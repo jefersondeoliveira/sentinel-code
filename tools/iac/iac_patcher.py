@@ -52,6 +52,8 @@ def apply_iac_patch(gap: InfraGap, project_path: str) -> dict:
             return _patch_modify_attribute(gap, project_path, base)
         elif strategy == "append_file":
             return _patch_append_file(gap, project_path, base)
+        elif strategy == "modify_yaml":
+            return _patch_modify_yaml(gap, project_path, base)
     except Exception as e:
         base["status"] = "failed"
         base["reason"] = str(e)
@@ -187,6 +189,138 @@ def _patch_append_file(gap: InfraGap, project_path: str, result: dict) -> dict:
     result["file"]   = str(new_file.relative_to(project_path))
     result["status"] = "applied"
     return result
+
+
+def _patch_modify_yaml(gap: InfraGap, project_path: str, result: dict) -> dict:
+    """
+    Modifica YAML existente (ex: adiciona resource limits ou health probes
+    em Deployments K8s).
+
+    Nota: usa yaml.dump() que perde comentários e pode alterar key order.
+    Esta é uma limitação conhecida da Fase 3.
+    """
+    import yaml
+
+    file_path = Path(project_path) / gap.file_path
+
+    if not file_path.exists():
+        result["status"] = "failed"
+        result["reason"] = f"Arquivo não encontrado: {gap.file_path}"
+        return result
+
+    original = file_path.read_text(encoding="utf-8")
+
+    try:
+        doc = yaml.safe_load(original)
+    except Exception as e:
+        result["status"] = "failed"
+        result["reason"] = f"YAML inválido: {e}"
+        return result
+
+    if not doc:
+        result["status"] = "skipped"
+        result["reason"] = "Documento YAML vazio"
+        return result
+
+    patched_doc, changed = _apply_yaml_patch(gap, doc)
+
+    if not changed:
+        result["status"] = "skipped"
+        result["reason"] = "YAML já está configurado corretamente"
+        return result
+
+    patched_content = yaml.dump(
+        patched_doc,
+        default_flow_style=False,
+        allow_unicode=True,
+    )
+
+    backup = _create_backup(file_path)
+    file_path.write_text(patched_content, encoding="utf-8")
+
+    if not _validate_yaml(patched_content):
+        _restore_backup(backup, file_path)
+        result["status"] = "failed"
+        result["reason"] = "YAML inválido após patch — revertido"
+        return result
+
+    backup.unlink(missing_ok=True)
+    result["before"] = original
+    result["after"]  = patched_content
+    result["status"] = "applied"
+    return result
+
+
+def _apply_yaml_patch(gap: InfraGap, doc: dict) -> tuple:
+    """Despacha para o helper correto e retorna (doc_modificado, changed)."""
+    if gap.category == InfraGapCategory.MISSING_HEALTH_CHECK:
+        return _add_probes_to_deployment(doc)
+    if gap.category == InfraGapCategory.UNDERSIZED_INSTANCE:
+        resource_prefix = gap.resource.split("/")[0] if "/" in gap.resource else gap.resource.split(".")[0]
+        if resource_prefix in ("Deployment", "StatefulSet"):
+            return _add_resource_limits_to_deployment(doc)
+    return doc, False
+
+
+def _add_resource_limits_to_deployment(doc: dict) -> tuple:
+    """Adiciona resources.requests e resources.limits a containers sem configuração."""
+    default_resources = {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits":   {"cpu": "500m", "memory": "512Mi"},
+    }
+    changed = False
+    try:
+        containers = (
+            doc.get("spec", {})
+               .get("template", {})
+               .get("spec", {})
+               .get("containers", [])
+        )
+        for container in containers:
+            if not isinstance(container, dict):
+                continue
+            resources = container.get("resources", {})
+            if "requests" not in resources or "limits" not in resources:
+                container["resources"] = {**default_resources, **resources}
+                changed = True
+    except Exception:
+        pass
+    return doc, changed
+
+
+def _add_probes_to_deployment(doc: dict) -> tuple:
+    """Adiciona livenessProbe e readinessProbe a containers sem health checks."""
+    default_probe_base = {
+        "httpGet": {"path": "/actuator/health", "port": 8080},
+    }
+    changed = False
+    try:
+        containers = (
+            doc.get("spec", {})
+               .get("template", {})
+               .get("spec", {})
+               .get("containers", [])
+        )
+        for container in containers:
+            if not isinstance(container, dict):
+                continue
+            if "livenessProbe" not in container:
+                container["livenessProbe"] = {
+                    **default_probe_base,
+                    "initialDelaySeconds": 30,
+                    "periodSeconds": 10,
+                }
+                changed = True
+            if "readinessProbe" not in container:
+                container["readinessProbe"] = {
+                    **default_probe_base,
+                    "initialDelaySeconds": 10,
+                    "periodSeconds": 5,
+                }
+                changed = True
+    except Exception:
+        pass
+    return doc, changed
 
 
 # =============================================================================
@@ -347,6 +481,12 @@ _STRATEGY_MAP = {
     },
     InfraGapCategory.UNDERSIZED_INSTANCE: {
         "aws_instance":    "modify_attribute",
+        "Deployment":      "modify_yaml",
+        "StatefulSet":     "modify_yaml",
+    },
+    InfraGapCategory.MISSING_HEALTH_CHECK: {
+        "Deployment":      "modify_yaml",
+        "StatefulSet":     "modify_yaml",
     },
 }
 

@@ -389,3 +389,116 @@ class TestIaCPatcherPipeline:
         graph  = build_iac_patcher_graph()
         result = graph.invoke(state)
         assert result["applied_fixes"] == []
+
+
+# =============================================================================
+# Testes da estratégia modify_yaml (K8s) — Fase 3
+# =============================================================================
+
+YAML_NO_RESOURCES = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        image: api:latest
+"""
+
+YAML_NO_PROBES = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        image: api:latest
+        resources:
+          requests:
+            cpu: 100m
+          limits:
+            cpu: 500m
+"""
+
+YAML_FULL = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        image: api:latest
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+"""
+
+
+class TestK8sYamlPatch:
+
+    def test_adds_resource_limits_to_deployment(self, tmp_path):
+        from tools.iac.iac_patcher import apply_iac_patch
+        f = tmp_path / "deployment.yaml"
+        f.write_text(YAML_NO_RESOURCES, encoding="utf-8")
+        gap = make_gap(InfraGapCategory.UNDERSIZED_INSTANCE, "Deployment/api", "deployment.yaml")
+        result = apply_iac_patch(gap, str(tmp_path))
+        assert result["status"] == "applied"
+        content = f.read_text()
+        assert "resources" in content
+
+    def test_adds_probes_to_deployment(self, tmp_path):
+        from tools.iac.iac_patcher import apply_iac_patch
+        f = tmp_path / "deployment.yaml"
+        f.write_text(YAML_NO_PROBES, encoding="utf-8")
+        gap = make_gap(InfraGapCategory.MISSING_HEALTH_CHECK, "Deployment/api", "deployment.yaml")
+        result = apply_iac_patch(gap, str(tmp_path))
+        assert result["status"] == "applied"
+        content = f.read_text()
+        assert "livenessProbe" in content
+        assert "readinessProbe" in content
+
+    def test_skips_if_already_fully_configured(self, tmp_path):
+        from tools.iac.iac_patcher import apply_iac_patch
+        f = tmp_path / "deployment.yaml"
+        f.write_text(YAML_FULL, encoding="utf-8")
+        gap = make_gap(InfraGapCategory.MISSING_HEALTH_CHECK, "Deployment/api", "deployment.yaml")
+        result = apply_iac_patch(gap, str(tmp_path))
+        assert result["status"] == "skipped"
+
+    def test_patched_yaml_is_valid(self, tmp_path):
+        import yaml
+        from tools.iac.iac_patcher import apply_iac_patch
+        f = tmp_path / "deployment.yaml"
+        f.write_text(YAML_NO_RESOURCES, encoding="utf-8")
+        gap = make_gap(InfraGapCategory.MISSING_HEALTH_CHECK, "Deployment/api", "deployment.yaml")
+        result = apply_iac_patch(gap, str(tmp_path))
+        if result["status"] == "applied":
+            parsed = yaml.safe_load(f.read_text())
+            assert parsed is not None
+
+    def test_fails_gracefully_on_missing_file(self, tmp_path):
+        from tools.iac.iac_patcher import apply_iac_patch
+        gap = make_gap(InfraGapCategory.MISSING_HEALTH_CHECK, "Deployment/api", "nonexistent.yaml")
+        result = apply_iac_patch(gap, str(tmp_path))
+        assert result["status"] == "failed"

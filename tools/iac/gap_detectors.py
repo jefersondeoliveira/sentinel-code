@@ -346,3 +346,173 @@ def _parse_availability(availability: str) -> float:
         return float(str(availability).replace("%", "").strip())
     except (ValueError, AttributeError):
         return 99.0
+
+
+# =============================================================================
+# DETECTOR 4 — K8s: Resource Limits Ausentes
+# =============================================================================
+
+def detect_k8s_missing_resource_limits(
+    iac_files: List[dict],
+    nfr: dict,
+) -> List[InfraGap]:
+    """
+    Detecta containers em Deployments/StatefulSets K8s sem resources.requests
+    ou resources.limits configurados.
+
+    Por que isso importa:
+    Sem limits, um container pode consumir toda a CPU/memória do nó,
+    causando OOM kill em outros pods. Sem requests, o scheduler não
+    consegue alocar recursos de forma eficiente.
+    """
+    gaps = []
+    k8s_files = [
+        f for f in iac_files
+        if f.get("type") == "kubernetes" and f.get("parsed")
+    ]
+
+    for f in k8s_files:
+        try:
+            parsed = f["parsed"]
+            kind = parsed.get("kind", "")
+            if kind not in ("Deployment", "StatefulSet"):
+                continue
+
+            name = parsed.get("metadata", {}).get("name", "unknown")
+            containers = (
+                parsed.get("spec", {})
+                      .get("template", {})
+                      .get("spec", {})
+                      .get("containers", [])
+            )
+
+            for container in containers:
+                if not isinstance(container, dict):
+                    continue
+                resources = container.get("resources", {})
+                missing_requests = "requests" not in resources
+                missing_limits = "limits" not in resources
+
+                if missing_requests or missing_limits:
+                    missing = []
+                    if missing_requests:
+                        missing.append("requests")
+                    if missing_limits:
+                        missing.append("limits")
+                    container_name = container.get("name", "unknown")
+
+                    gaps.append(InfraGap(
+                        category=InfraGapCategory.UNDERSIZED_INSTANCE,
+                        severity=Severity.HIGH,
+                        resource=f"{kind}/{name}",
+                        file_path=f["path"],
+                        root_cause=(
+                            f"Container '{container_name}' no {kind} '{name}' sem "
+                            f"resources.{' e resources.'.join(missing)}. "
+                            "O scheduler K8s não consegue alocar recursos corretamente."
+                        ),
+                        evidence=f"containers[{container_name}]: sem {', '.join(missing)}",
+                        suggestion=(
+                            "Adicione resources.requests e resources.limits com "
+                            "valores de CPU e memória adequados à aplicação."
+                        ),
+                        current_config={"resources": "não definido"},
+                        recommended_config={
+                            "requests": {"cpu": "100m", "memory": "128Mi"},
+                            "limits": {"cpu": "500m", "memory": "512Mi"},
+                        },
+                    ))
+        except Exception:
+            continue  # Arquivo K8s malformado — ignora silenciosamente
+
+    return gaps
+
+
+# =============================================================================
+# DETECTOR 5 — K8s: Health Probes Ausentes
+# =============================================================================
+
+def detect_k8s_missing_probes(
+    iac_files: List[dict],
+    nfr: dict,
+) -> List[InfraGap]:
+    """
+    Detecta containers em Deployments/StatefulSets K8s sem livenessProbe
+    e/ou readinessProbe configurados.
+
+    Por que isso importa:
+    Sem readinessProbe, o K8s envia tráfego para pods que ainda não estão
+    prontos. Sem livenessProbe, pods travados nunca são reiniciados
+    automaticamente, causando degradação silenciosa.
+    """
+    gaps = []
+    k8s_files = [
+        f for f in iac_files
+        if f.get("type") == "kubernetes" and f.get("parsed")
+    ]
+
+    for f in k8s_files:
+        try:
+            parsed = f["parsed"]
+            kind = parsed.get("kind", "")
+            if kind not in ("Deployment", "StatefulSet"):
+                continue
+
+            name = parsed.get("metadata", {}).get("name", "unknown")
+            containers = (
+                parsed.get("spec", {})
+                      .get("template", {})
+                      .get("spec", {})
+                      .get("containers", [])
+            )
+
+            for container in containers:
+                if not isinstance(container, dict):
+                    continue
+
+                missing_probes = []
+                if "livenessProbe" not in container:
+                    missing_probes.append("livenessProbe")
+                if "readinessProbe" not in container:
+                    missing_probes.append("readinessProbe")
+
+                if not missing_probes:
+                    continue
+
+                container_name = container.get("name", "unknown")
+                gaps.append(InfraGap(
+                    category=InfraGapCategory.MISSING_HEALTH_CHECK,
+                    severity=Severity.HIGH,
+                    resource=f"{kind}/{name}",
+                    file_path=f["path"],
+                    root_cause=(
+                        f"Container '{container_name}' sem "
+                        f"{' e '.join(missing_probes)}. "
+                        "K8s não detecta falhas da aplicação automaticamente."
+                    ),
+                    evidence=(
+                        f"containers[{container_name}]: sem "
+                        f"{', '.join(missing_probes)}"
+                    ),
+                    suggestion=(
+                        "Adicione livenessProbe e readinessProbe apontando para "
+                        "/actuator/health (Spring Boot Actuator) na porta 8080."
+                    ),
+                    current_config={p: "ausente" for p in missing_probes},
+                    recommended_config={
+                        "livenessProbe": {
+                            "httpGet": {"path": "/actuator/health", "port": 8080},
+                            "initialDelaySeconds": 30,
+                            "periodSeconds": 10,
+                        },
+                        "readinessProbe": {
+                            "httpGet": {"path": "/actuator/health", "port": 8080},
+                            "initialDelaySeconds": 10,
+                            "periodSeconds": 5,
+                        },
+                    },
+                ))
+        except Exception:
+            continue  # Arquivo K8s malformado — ignora silenciosamente
+
+    return gaps

@@ -30,6 +30,7 @@ class AgentState(TypedDict):
     test_results:    Optional[dict]
 
     # --- Relatório final ---
+    report_format: str          # "html" (default) | "pdf"
     final_report: Optional[str]
 
     # --- Log interno ---

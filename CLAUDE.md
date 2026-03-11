@@ -122,6 +122,14 @@ sentinel-code/
 | N+1 Query | AST + fallback textual | ✅ |
 | Cache Ausente | Heurística @GetMapping | ✅ |
 | Connection Pool | Parse application.properties/yml | ✅ |
+| Paginação | Regex findAll() / List< sem Pageable em @Repository | ✅ |
+| Lazy Loading | Regex @OneToMany/@ManyToMany sem FetchType.EAGER | ✅ |
+| Thread Blocking | Regex Thread.sleep/.get()/.block()/.join() | ✅ |
+| Índice Ausente | Regex findBy* sem @Index (dois passes cross-file) | ✅ |
+
+**Nota:** As categorias PAGINATION, LAZY_LOADING, THREAD_BLOCKING, MISSING_INDEX
+NÃO estão em `FIXABLE_CATEGORIES` — são reportadas e enriquecidas pelo LLM,
+mas requerem revisão manual para correção.
 
 ### Detectores IaC (`tools/iac/gap_detectors.py`)
 | Detector | Recurso | Status |
@@ -129,6 +137,8 @@ sentinel-code/
 | Missing Autoscaling | ECS / K8s Deployment | ✅ |
 | Single AZ | RDS multi_az=false | ✅ |
 | Undersized Instance | instance_type vs max_rps | ✅ |
+| K8s Resource Limits | Deployment/StatefulSet containers sem resources | ✅ |
+| K8s Health Probes | Deployment/StatefulSet sem liveness/readinessProbe | ✅ |
 
 ### Estratégias de patch IaC (`tools/iac/iac_patcher.py`)
 | Estratégia | Uso | Status |
@@ -136,6 +146,10 @@ sentinel-code/
 | append_block | Adiciona bloco HCL (ECS autoscaling) | ✅ |
 | modify_attribute | Altera atributo em-linha (multi_az) | ✅ |
 | append_file | Cria novo arquivo (K8s HPA yaml) | ✅ |
+| modify_yaml | Modifica YAML K8s existente (resources, probes) | ✅ |
+
+**Nota `modify_yaml`:** usa `yaml.dump()` — perde comentários e pode alterar
+key order. Limitação conhecida da Fase 3; solução futura usa `ruamel.yaml`.
 
 ---
 
@@ -211,28 +225,31 @@ Solução: declarar `test_plan: List[dict]` no AgentState.
 - [x] Benchmark Agent (Locust integrado programaticamente)
 - [x] Test Agent (geração de testes funcionais)
 
-### Fase 3 — Expansão
-- [ ] Suporte a K8s manifests
+### Fase 3 — Expansão ✅ PARCIALMENTE CONCLUÍDA
+- [x] Suporte a K8s manifests (detect_k8s_missing_resource_limits, detect_k8s_missing_probes, modify_yaml)
 - [ ] Suporte a CloudFormation
 - [ ] Simulação de custo AWS
-- [ ] Relatório PDF executivo
-- [ ] LangSmith observabilidade completa
-- [ ] Mais detectores Java (Missing Index, Lazy Loading, Thread Blocking)
+- [x] Relatório PDF executivo (--pdf flag + WeasyPrint com fallback HTML)
+- [x] LangSmith observabilidade completa
+- [x] Mais detectores Java (PAGINATION, LAZY_LOADING, THREAD_BLOCKING, MISSING_INDEX)
 
 ---
 
-## 📊 Suite de testes (104 testes passando)
+## 📊 Suite de testes (169 testes passando)
 
 ```
 tests/unit/test_iac_detectors.py       → 16 testes  ✅
 tests/unit/test_iac_file_reader.py     → 16 testes  ✅
 tests/unit/test_iac_analyzer_agent.py  → 10 testes  ✅
-tests/unit/test_iac_patcher.py         → 17 testes  ✅
+tests/unit/test_iac_patcher.py         → 22 testes  ✅  (+5 K8s YAML patcher)
 tests/unit/test_benchmark.py           → 22 testes  ✅
 tests/unit/test_test_agent.py          → 20 testes  ✅
+tests/unit/test_java_detectors.py      → 23 testes  ✅  (Fase 3 — novos)
+tests/unit/test_k8s_detectors.py       → 14 testes  ✅  (Fase 3 — novos)
 + testes Fase 1                        →  3 testes  ✅
++ testes tracer                        →  1 teste   ✅
 ─────────────────────────────────────────────────────
-Total                                  → 104 testes ✅
+Total                                  → 169 testes ✅
 ```
 
 ---
@@ -257,9 +274,20 @@ python main.py --path .\sample_project\ --no-iac
 # Com benchmark + NFRs
 python main.py --path .\sample_project\ --benchmark --nfr '{"target_url":"http://localhost:8080","p99_latency_ms":200}'
 
+# Com relatório PDF (requer weasyprint + GTK3 runtime no Windows)
+python main.py --path .\sample_project\ --pdf
+
 # Rodar todos os testes
 pytest tests/ -v
 ```
+
+### WeasyPrint (PDF Export)
+`weasyprint>=60.0.0` — exige dependências de sistema:
+- **Windows:** instale GTK3 runtime: https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer
+- **Linux:** `apt install libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0`
+- **macOS:** `brew install pango`
+
+O pipeline faz fallback automático para HTML se weasyprint não estiver disponível.
 
 ---
 

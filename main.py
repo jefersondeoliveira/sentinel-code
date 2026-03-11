@@ -18,6 +18,8 @@ from models.state import AgentState
 from tools.observability.tracer import setup_tracing, get_run_tags, get_run_metadata
 from config import settings
 
+from pathlib import Path
+
 app     = typer.Typer(help="SentinelCode — Análise e correção de performance")
 console = Console()
 
@@ -45,6 +47,9 @@ def main(
     nfr_json: str = typer.Option(
         "{}", "--nfr", help='NFRs em JSON: \'{"target_url":"http://...","p99_latency_ms":200}\''
     ),
+    pdf: bool = typer.Option(
+        False, "--pdf", help="Gera relatório em PDF além do HTML (requer weasyprint)"
+    ),
 ):
     """
     Executa o pipeline completo: análise → correção → IaC → benchmark → testes → relatório.
@@ -69,6 +74,7 @@ def main(
     console.print(f"  Benchmark : {'[green]sim[/green]' if with_benchmark else '[dim]não[/dim]'}")
     console.print(f"  Testes    : {'[green]sim[/green]' if with_tests and not dry_run else '[dim]não[/dim]'}")
     console.print(f"  LangSmith : {'[green]ativo ✅[/green]' if tracing_active else '[dim]desabilitado[/dim]'}")
+    console.print(f"  Formato   : {'[cyan]PDF[/cyan]' if pdf else '[dim]HTML[/dim]'}")
     if nfr:
         console.print(f"  NFR       : {nfr}")
     console.print()
@@ -85,6 +91,7 @@ def main(
         "test_plan":                   [],
         "generated_tests":             [],
         "test_results":                None,
+        "report_format":               "pdf" if pdf else "html",
         "final_report":                None,
         "messages":                    [],
     }
@@ -133,11 +140,11 @@ def main(
     # ── Link do relatório ──
     report_path = result.get("final_report")
     if report_path:
-        from pathlib import Path
         console.print()
         console.rule()
         console.print(f"\n  📄 Relatório: [bold cyan]{Path(report_path).resolve()}[/bold cyan]")
-        console.print("  💡 Abra o arquivo HTML no seu navegador\n")
+        hint = "Abra o PDF no seu visualizador" if pdf else "Abra o arquivo HTML no seu navegador"
+        console.print(f"  💡 {hint}\n")
 
 
 # =============================================================================

@@ -90,15 +90,32 @@ def generate_report_node(state: AgentState) -> dict:
 
     output_dir = Path("outputs")
     output_dir.mkdir(exist_ok=True)
-    timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path  = output_dir / f"report_{project_name}_{timestamp}.html"
-    output_path.write_text(html_content, encoding="utf-8")
+    timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_html = output_dir / f"report_{project_name}_{timestamp}.html"
+    output_html.write_text(html_content, encoding="utf-8")
 
-    print(f"    ✅ Relatório salvo em: {output_path}")
+    report_format = state.get("report_format", "html")
+    final_path = str(output_html)
+
+    if report_format == "pdf":
+        print("\n📄 [2/2] Gerando relatório PDF...")
+        try:
+            from weasyprint import HTML as WeasyHTML
+            output_pdf = output_dir / f"report_{project_name}_{timestamp}.pdf"
+            WeasyHTML(string=html_content).write_pdf(str(output_pdf))
+            final_path = str(output_pdf)
+            print(f"    ✅ PDF salvo em: {output_pdf}")
+        except ImportError:
+            print("    ⚠️  weasyprint não instalado — usando relatório HTML.")
+            print("    💡 Instale com: pip install weasyprint")
+        except Exception as e:
+            print(f"    ⚠️  Erro ao gerar PDF: {e} — usando relatório HTML.")
+    else:
+        print(f"    ✅ Relatório HTML salvo em: {output_html}")
 
     return {
-        "final_report": str(output_path),
-        "messages": [f"Relatório gerado: {output_path}"],
+        "final_report": final_path,
+        "messages": [f"Relatório gerado: {final_path}"],
     }
 
 

@@ -21,6 +21,8 @@ from tools.iac.gap_detectors import (
     detect_missing_autoscaling,
     detect_single_az,
     detect_undersized_instance,
+    detect_k8s_missing_resource_limits,
+    detect_k8s_missing_probes,
 )
 
 
@@ -75,6 +77,14 @@ def detect_infra_gaps_node(state: AgentState) -> dict:
     undersized_gaps = detect_undersized_instance(iac_files, nfr)
     print(f"    Instância Subdimensionada: {len(undersized_gaps)} gap(s)")
     gaps.extend(undersized_gaps)
+
+    k8s_resource_gaps = detect_k8s_missing_resource_limits(iac_files, nfr)
+    print(f"    K8s Resource Limits:       {len(k8s_resource_gaps)} gap(s)")
+    gaps.extend(k8s_resource_gaps)
+
+    k8s_probe_gaps = detect_k8s_missing_probes(iac_files, nfr)
+    print(f"    K8s Health Probes:         {len(k8s_probe_gaps)} gap(s)")
+    gaps.extend(k8s_probe_gaps)
 
     print(f"    ─────────────────────────────")
     print(f"    Total: {len(gaps)} gap(s) encontrado(s)")

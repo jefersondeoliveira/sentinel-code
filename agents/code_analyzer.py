@@ -22,6 +22,10 @@ from tools.java.issue_detectors import (
     detect_n_plus_one,
     detect_missing_cache,
     detect_connection_pool,
+    detect_pagination_issues,
+    detect_lazy_loading,
+    detect_thread_blocking,
+    detect_missing_index,
 )
 
 
@@ -87,6 +91,22 @@ def detect_issues_node(state: AgentState) -> dict:
     pool_issues = detect_connection_pool(app_configs)
     print(f"    Connection Pool: {len(pool_issues)} issue(s)")
     issues.extend(pool_issues)
+
+    pagination_issues = detect_pagination_issues(java_files)
+    print(f"    Paginação:       {len(pagination_issues)} issue(s)")
+    issues.extend(pagination_issues)
+
+    lazy_issues = detect_lazy_loading(java_files)
+    print(f"    Lazy Loading:    {len(lazy_issues)} issue(s)")
+    issues.extend(lazy_issues)
+
+    blocking_issues = detect_thread_blocking(java_files)
+    print(f"    Thread Blocking: {len(blocking_issues)} issue(s)")
+    issues.extend(blocking_issues)
+
+    index_issues = detect_missing_index(java_files)
+    print(f"    Índice Ausente:  {len(index_issues)} issue(s)")
+    issues.extend(index_issues)
 
     print(f"    ─────────────────────────────")
     print(f"    Total: {len(issues)} issue(s) encontrado(s)")

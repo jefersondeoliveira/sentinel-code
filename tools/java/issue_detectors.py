@@ -331,3 +331,314 @@ def detect_connection_pool(app_configs: dict) -> List[Issue]:
             ))
 
     return issues
+
+
+# =============================================================================
+# DETECTOR 4 — Paginação Ausente
+# =============================================================================
+
+def detect_pagination_issues(java_files: List[dict]) -> List[Issue]:
+    """
+    Detecta repositórios JPA que retornam List<Entity> sem paginação.
+
+    Estratégia textual:
+    - Identifica interfaces/classes com @Repository
+    - Dentro delas, procura métodos que retornam List< (não Page<)
+      com nomes findAll, findBy*, getBy*, listBy*, etc.
+    - Verifica ausência de Pageable nos parâmetros
+
+    Por que isso importa:
+    findAll() sem paginação retorna TODOS os registros da tabela em memória.
+    Com 100k+ registros isso causa OOM e latência extrema.
+    """
+    issues = []
+
+    findall_pattern = re.compile(r'\.findAll\s*\(\s*\)', re.IGNORECASE)
+    list_return_pattern = re.compile(
+        r'List\s*<\s*\w+\s*>\s+(findAll|findBy\w+|getAll|getBy\w+|listBy\w+|fetchAll)\s*\('
+    )
+    pageable_pattern = re.compile(r'Pageable', re.IGNORECASE)
+
+    for file in java_files:
+        content = file["content"]
+        lines = content.splitlines()
+
+        # Verifica se o arquivo tem @Repository ou JpaRepository
+        is_repository = bool(re.search(r'@Repository|JpaRepository|CrudRepository', content))
+        if not is_repository:
+            continue
+
+        for i, line in enumerate(lines, start=1):
+            stripped = line.strip()
+
+            # Padrão 1: chamada direta a findAll() sem argumento
+            if findall_pattern.search(stripped):
+                if not pageable_pattern.search(stripped):
+                    issues.append(Issue(
+                        category=IssueCategory.PAGINATION,
+                        severity=Severity.HIGH,
+                        file_path=file["path"],
+                        line=i,
+                        root_cause=(
+                            "Chamada findAll() sem Pageable retorna todos os registros "
+                            "da tabela em memória, causando OOM em produção."
+                        ),
+                        evidence=stripped[:120],
+                        suggestion=(
+                            "Refatore para Page<T> findAll(Pageable pageable) e "
+                            "passe PageRequest.of(page, size) no service."
+                        ),
+                    ))
+                continue
+
+            # Padrão 2: método declarado retornando List< sem Pageable
+            match = list_return_pattern.search(stripped)
+            if match:
+                # Verifica se a assinatura do método inclui Pageable
+                signature = stripped
+                if ")" not in stripped and i < len(lines):
+                    signature += " " + lines[i].strip()
+
+                if not pageable_pattern.search(signature):
+                    method_name = match.group(1)
+                    issues.append(Issue(
+                        category=IssueCategory.PAGINATION,
+                        severity=Severity.HIGH,
+                        file_path=file["path"],
+                        line=i,
+                        root_cause=(
+                            f"Método '{method_name}' retorna List<T> sem paginação. "
+                            "Pode carregar toda a tabela em memória."
+                        ),
+                        evidence=stripped[:120],
+                        suggestion=(
+                            f"Altere a assinatura para Page<T> {method_name}"
+                            "(Pageable pageable) e use no service com PageRequest."
+                        ),
+                    ))
+
+    return issues
+
+
+# =============================================================================
+# DETECTOR 5 — Lazy Loading sem proteção JSON
+# =============================================================================
+
+def detect_lazy_loading(java_files: List[dict]) -> List[Issue]:
+    """
+    Detecta relações JPA lazy (@OneToMany, @ManyToMany) sem anotações de
+    proteção à serialização JSON (@JsonManagedReference, @JsonBackReference,
+    @JsonIgnoreProperties).
+
+    Por que isso importa:
+    Serialização Jackson de entidades com relações lazy causa
+    LazyInitializationException ou loop infinito de serialização.
+    A correção é usar @JsonManagedReference/@JsonBackReference ou DTOs.
+    """
+    issues = []
+
+    lazy_relation_pattern = re.compile(
+        r'@(OneToMany|ManyToMany)(?!\([^)]*FetchType\.EAGER)',
+        re.IGNORECASE
+    )
+    json_protection = re.compile(
+        r'@JsonManagedReference|@JsonBackReference|@JsonIgnoreProperties',
+        re.IGNORECASE
+    )
+
+    for file in java_files:
+        content = file["content"]
+        lines = content.splitlines()
+
+        # Só analisa entidades JPA
+        if not re.search(r'@Entity', content):
+            continue
+
+        has_json_protection = bool(json_protection.search(content))
+
+        for i, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            match = lazy_relation_pattern.search(stripped)
+            if not match:
+                continue
+
+            annotation = match.group(1)
+            # Verifica se as próximas linhas têm proteção JSON local
+            local_block = "\n".join(lines[i - 1:min(i + 3, len(lines))])
+            if has_json_protection and json_protection.search(local_block):
+                continue
+
+            issues.append(Issue(
+                category=IssueCategory.LAZY_LOADING,
+                severity=Severity.HIGH,
+                file_path=file["path"],
+                line=i,
+                root_cause=(
+                    f"@{annotation} sem FetchType.EAGER pode causar "
+                    "LazyInitializationException durante serialização JSON."
+                ),
+                evidence=f"@{annotation} em {file['path']}:{i}",
+                suggestion=(
+                    "Adicione @JsonManagedReference na coleção e @JsonBackReference "
+                    "no lado inverso, ou use DTOs para serialização."
+                ),
+            ))
+
+    return issues
+
+
+# =============================================================================
+# DETECTOR 6 — Thread Blocking
+# =============================================================================
+
+def detect_thread_blocking(java_files: List[dict]) -> List[Issue]:
+    """
+    Detecta chamadas que bloqueiam a thread do servidor:
+    - Thread.sleep() — bloqueia thread do pool por tempo fixo
+    - future.get() — bloqueia aguardando CompletableFuture
+    - .block() — bloqueia em fluxo reativo (Project Reactor)
+    - future.join() — bloqueia aguardando CompletableFuture
+
+    Por que isso importa:
+    Threads bloqueadas reduzem o throughput máximo do servidor.
+    Em servidores com pool de 200 threads, 10 chamadas Thread.sleep(1000)
+    consomem 10 threads por segundo — degradação linear sob carga.
+    """
+    issues = []
+
+    blocking_patterns = [
+        (re.compile(r'Thread\.sleep\s*\('),
+         "Thread.sleep() bloqueia a thread do servidor — reduz throughput máximo",
+         "Use agendamento assíncrono (@Scheduled, ScheduledExecutorService) ou reactive delay."),
+
+        (re.compile(r'\.get\s*\(\s*\)'),
+         "CompletableFuture.get() bloqueia a thread aguardando resultado",
+         "Use thenApply()/thenAccept() para encadear operações sem bloquear."),
+
+        (re.compile(r'\.block\s*\(\s*\)'),
+         ".block() em fluxo reativo bloqueia thread do servidor",
+         "Use operadores reativos (map, flatMap, subscribe) em vez de .block()."),
+
+        (re.compile(r'\.join\s*\(\s*\)'),
+         "Future.join() bloqueia thread até completar",
+         "Use thenApply()/thenCompose() para composição não-bloqueante."),
+    ]
+
+    for file in java_files:
+        content = file["content"]
+        lines = content.splitlines()
+
+        for i, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            if stripped.startswith("//") or stripped.startswith("*"):
+                continue
+
+            for pattern, root_cause, suggestion in blocking_patterns:
+                if pattern.search(stripped):
+                    issues.append(Issue(
+                        category=IssueCategory.THREAD_BLOCKING,
+                        severity=Severity.CRITICAL,
+                        file_path=file["path"],
+                        line=i,
+                        root_cause=root_cause,
+                        evidence=stripped[:120],
+                        suggestion=suggestion,
+                    ))
+
+    return issues
+
+
+# =============================================================================
+# DETECTOR 7 — Índice Ausente
+# =============================================================================
+
+def detect_missing_index(java_files: List[dict]) -> List[Issue]:
+    """
+    Detecta métodos findBy* em repositórios cujos campos não têm @Index
+    declarado na entidade correspondente.
+
+    Estratégia em dois passes:
+    1. Coleta todas as colunas indexadas via @Table(indexes = @Index(columnList="..."))
+    2. Para cada método findBy* em @Repository, extrai o(s) campo(s) implícito(s)
+       e compara com os índices coletados no passo 1.
+
+    Por que isso importa:
+    findByEmail() sem índice em email resulta em full table scan.
+    Com 1M de registros: index scan ~0.1ms vs full scan ~800ms.
+    """
+    issues = []
+
+    # Passo 1: coletar colunas indexadas (de todos os arquivos)
+    indexed_columns: set = set()
+    index_col_pattern = re.compile(
+        r'@Index\s*\([^)]*columnList\s*=\s*["\']([^"\']+)["\']',
+        re.IGNORECASE
+    )
+    for file in java_files:
+        for match in index_col_pattern.finditer(file["content"]):
+            for col in match.group(1).split(","):
+                indexed_columns.add(col.strip().lower())
+
+    # Passo 2: verificar métodos findBy* em repositories
+    findby_pattern = re.compile(
+        r'(?:List|Page|Optional|Set|Collection)\s*<[^>]+>\s+'
+        r'(find(?:By|All\w*)|get(?:By|All\w*)|count(?:By\w*)|exists(?:By\w*))'
+        r'(\w*)\s*\(',
+    )
+
+    for file in java_files:
+        content = file["content"]
+        lines = content.splitlines()
+
+        if not re.search(r'@Repository|JpaRepository|CrudRepository', content):
+            continue
+
+        for i, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            match = findby_pattern.search(stripped)
+            if not match:
+                continue
+
+            prefix = match.group(1)
+            suffix = match.group(2)
+
+            if not suffix:
+                continue  # findAll sem campo específico
+
+            raw_fields = re.split(r'(?:And|Or)(?=[A-Z])', suffix)
+            fields = [_camel_to_snake(f) for f in raw_fields if f]
+
+            for field in fields:
+                if field and field not in indexed_columns:
+                    issues.append(Issue(
+                        category=IssueCategory.MISSING_INDEX,
+                        severity=Severity.HIGH,
+                        file_path=file["path"],
+                        line=i,
+                        root_cause=(
+                            f"Método '{prefix}{suffix}()' implica WHERE em '{field}' "
+                            "sem @Index correspondente — resulta em full table scan."
+                        ),
+                        evidence=stripped[:120],
+                        suggestion=(
+                            f"Adicione @Index(columnList = \"{field}\") na anotação "
+                            f"@Table da entidade ou crie migration Flyway/Liquibase."
+                        ),
+                    ))
+
+    return issues
+
+
+def _camel_to_snake(name: str) -> str:
+    """Converte CamelCase para snake_case para comparação com columnList."""
+    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
+    s = re.sub(r'([a-z\d])([A-Z])', r'\1_\2', s)
+    return s.lower()
+
+
+def _find_line(lines: List[str], method_name: str) -> int:
+    """Encontra o número da linha onde method_name aparece."""
+    for i, line in enumerate(lines, start=1):
+        if method_name in line:
+            return i
+    return 0

@@ -437,7 +437,7 @@ SLA Validation:    ✅ P99 < 200ms atingido | ✅ RPS > 5.000 atingido
 - [ ] Suporte a CloudFormation
 - [ ] Simulação de custo AWS
 - [ ] Relatório PDF executivo
-- [ ] LangSmith observabilidade completa
+- [x] LangSmith observabilidade completa
 - [ ] Mais detectores Java (Missing Index, Lazy Loading, Thread Blocking)
 
 ---
