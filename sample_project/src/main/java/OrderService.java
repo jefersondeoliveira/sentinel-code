@@ -1,0 +1,25 @@
+import org.springframework.web.bind.annotation.GetMapping;
+import java.util.List;
+
+public class OrderService {
+
+    // PROBLEMA 1: N+1 — busca orders e depois busca items de cada um em loop
+    public List<Order> processOrders() {
+        List<Order> orders = orderRepository.findAll();
+        List<Long> orderIds = orders.stream().map(Order::getId).collect(Collectors.toList());
+        Map<Long, List<Item>> itemsByOrderId = itemRepository.findAllByOrderIdIn(orderIds).stream()
+            .collect(Collectors.groupingBy(Item::getOrderId));
+        
+        for (Order order : orders) {
+            List<Item> items = itemsByOrderId.get(order.getId()); // N+1 resolvido
+        }
+        @Cacheable(value = "getAllProducts")
+        return orders;
+    }
+
+    // PROBLEMA 2: Cache ausente — getAll sem @Cacheable
+    @GetMapping("/products")
+    @Cacheable("products") // Adicionando cache
+    public List<Product> getAllProducts() {
+        return productRepository.findAll();
+    }

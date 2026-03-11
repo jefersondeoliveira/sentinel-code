@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SentinelCode Report — {{ project_name }}</title>
+  <style>
+    :root {
+      --critical: #dc2626; --critical-bg: #fef2f2;
+      --high:     #d97706; --high-bg:     #fffbeb;
+      --medium:   #2563eb; --medium-bg:   #eff6ff;
+      --low:      #16a34a; --low-bg:      #f0fdf4;
+      --bg:       #f8fafc; --card:        #ffffff;
+      --border:   #e2e8f0; --text:        #1e293b;
+      --muted:    #64748b; --code-bg:     #0f172a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+
+    /* ── Header ── */
+    .header { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white; padding: 48px 40px 36px; }
+    .header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.5px; }
+    .header h1 span { color: #38bdf8; }
+    .header .meta { margin-top: 8px; color: #94a3b8; font-size: 0.9rem; }
+
+    /* ── Layout ── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+    .section-title { font-size: 1.2rem; font-weight: 700; color: var(--text); margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+
+    /* ── Summary Cards ── */
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 8px; }
+    .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; }
+    .summary-card .number { font-size: 2.2rem; font-weight: 800; line-height: 1; }
+    .summary-card .label  { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+    .summary-card.critical .number { color: var(--critical); }
+    .summary-card.high     .number { color: var(--high); }
+    .summary-card.medium   .number { color: var(--medium); }
+    .summary-card.fixed    .number { color: var(--low); }
+
+    /* ── Badge ── */
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; }
+    .badge.CRÍTICO { background: var(--critical-bg); color: var(--critical); }
+    .badge.ALTO    { background: var(--high-bg);     color: var(--high); }
+    .badge.MÉDIO   { background: var(--medium-bg);   color: var(--medium); }
+    .badge.BAIXO   { background: var(--low-bg);      color: var(--low); }
+
+    /* ── Issue Card ── */
+    .issue-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+    .issue-header { padding: 16px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
+    .issue-header .category { font-weight: 700; font-size: 1rem; }
+    .issue-header .location { color: var(--muted); font-size: 0.85rem; font-family: monospace; margin-left: auto; }
+    .issue-body { padding: 16px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .issue-body .field label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--muted); letter-spacing: 0.5px; }
+    .issue-body .field p { margin-top: 4px; font-size: 0.9rem; }
+
+    /* ── Diff ── */
+    .diff-section { padding: 0 20px 20px; }
+    .diff-section .diff-title { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; letter-spacing: 0.5px; }
+    .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .diff-box { border-radius: 8px; overflow: hidden; }
+    .diff-box .diff-label { padding: 6px 14px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.5px; }
+    .diff-box.before .diff-label { background: #450a0a; color: #fca5a5; }
+    .diff-box.after  .diff-label { background: #052e16; color: #86efac; }
+    .diff-box pre { background: var(--code-bg); color: #e2e8f0; padding: 14px; font-size: 0.8rem; line-height: 1.6; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+    .diff-box.before pre { border-left: 3px solid var(--critical); }
+    .diff-box.after  pre { border-left: 3px solid var(--low); }
+
+    /* ── Fixes Table ── */
+    table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+    th { background: #f1f5f9; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); padding: 10px 16px; text-align: left; }
+    td { padding: 12px 16px; font-size: 0.88rem; border-top: 1px solid var(--border); }
+    td.success { color: var(--low); font-weight: 600; }
+    td.failed  { color: var(--critical); font-weight: 600; }
+    td code    { font-family: monospace; font-size: 0.82rem; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; }
+
+    /* ── Footer ── */
+    .footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 32px; border-top: 1px solid var(--border); margin-top: 40px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🤖 <span>SentinelCode</span> — Relatório de Performance</h1>
+  <div class="meta">
+    Projeto: <strong>{{ project_name }}</strong> &nbsp;|&nbsp;
+    Tipo: {{ project_type }} &nbsp;|&nbsp;
+    Gerado em: {{ generated_at }}
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ── Resumo Executivo ── -->
+  <div class="section-title">📊 Resumo Executivo</div>
+  <div class="summary-grid">
+    <div class="summary-card critical">
+      <div class="number">{{ counts.critical }}</div>
+      <div class="label">Crítico</div>
+    </div>
+    <div class="summary-card high">
+      <div class="number">{{ counts.high }}</div>
+      <div class="label">Alto</div>
+    </div>
+    <div class="summary-card medium">
+      <div class="number">{{ counts.medium }}</div>
+      <div class="label">Médio</div>
+    </div>
+    <div class="summary-card fixed">
+      <div class="number">{{ counts.fixed }}</div>
+      <div class="label">Fixes Aplicados</div>
+    </div>
+    <div class="summary-card" style="border-color: #38bdf8;">
+      <div class="number" style="color:#38bdf8;">{{ counts.total }}</div>
+      <div class="label">Total de Issues</div>
+    </div>
+  </div>
+
+  <!-- ── Issues Encontrados ── -->
+  <div class="section-title">🔍 Issues Encontrados</div>
+
+  {% for issue in issues %}
+  <div class="issue-card">
+    <div class="issue-header">
+      <span class="badge {{ issue.severity }}">{{ issue.severity }}</span>
+      <span class="category">{{ issue.category }}</span>
+      <span class="location">{{ issue.file_path }}{% if issue.line %}:{{ issue.line }}{% endif %}</span>
+    </div>
+    <div class="issue-body">
+      <div class="field">
+        <label>Causa Raiz</label>
+        <p>{{ issue.root_cause }}</p>
+      </div>
+      <div class="field">
+        <label>Correção Sugerida</label>
+        <p>{{ issue.suggestion }}</p>
+      </div>
+      {% if issue.evidence %}
+      <div class="field" style="grid-column: span 2;">
+        <label>Evidência</label>
+        <p><code>{{ issue.evidence }}</code></p>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if issue.before_code and issue.after_code %}
+    <div class="diff-section">
+      <div class="diff-title">🔀 Diff — Antes / Depois</div>
+      <div class="diff-grid">
+        <div class="diff-box before">
+          <div class="diff-label">— ANTES</div>
+          <pre>{{ issue.before_code }}</pre>
+        </div>
+        <div class="diff-box after">
+          <div class="diff-label">+ DEPOIS</div>
+          <pre>{{ issue.after_code }}</pre>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <!-- ── Fixes Aplicados ── -->
+  {% if fixes %}
+  <div class="section-title">🛠️ Fixes Aplicados</div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Categoria</th>
+        <th>Severidade</th>
+        <th>Arquivo</th>
+        <th>Alterações</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for fix in fixes %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ fix.issue_category }}</td>
+        <td><span class="badge {{ fix.issue_severity }}">{{ fix.issue_severity }}</span></td>
+        <td><code>{{ fix.file_path | truncate(50) }}</code></td>
+        <td>{{ fix.diff_summary }}</td>
+        <td class="{{ 'success' if fix.success else 'failed' }}">
+          {{ '✅ Aplicado' if fix.success else '❌ Falhou' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- ── Mensagens de Log ── -->
+  {% if messages %}
+  <div class="section-title">📋 Log de Execução</div>
+  <div style="background: var(--code-bg); border-radius: 10px; padding: 16px 20px;">
+    {% for msg in messages %}
+    <div style="color: #94a3b8; font-family: monospace; font-size: 0.82rem; padding: 2px 0;">
+      › {{ msg }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+
+<div class="footer">
+  Gerado por <strong>SentinelCode</strong> — Análise automática de performance &nbsp;|&nbsp; {{ generated_at }}
+</div>
+
+</body>
+</html>
