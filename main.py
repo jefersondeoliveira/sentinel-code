@@ -15,6 +15,8 @@ from rich.table   import Table
 from rich         import box
 
 from models.state import AgentState
+from tools.observability.tracer import setup_tracing, get_run_tags, get_run_metadata
+from config import settings
 
 app     = typer.Typer(help="SentinelCode — Análise e correção de performance")
 console = Console()
@@ -55,6 +57,8 @@ def main(
     except json.JSONDecodeError:
         console.print("[red]❌ --nfr inválido. Use JSON válido, ex: '{\"p99_latency_ms\": 200}'[/red]")
         raise typer.Exit(1)
+    
+    tracing_active = setup_tracing(settings)
 
     # Header
     console.rule("[bold cyan]🤖 SentinelCode[/bold cyan]")
@@ -64,6 +68,7 @@ def main(
     console.print(f"  IaC       : {'[green]sim[/green]' if with_iac else '[dim]não[/dim]'}")
     console.print(f"  Benchmark : {'[green]sim[/green]' if with_benchmark else '[dim]não[/dim]'}")
     console.print(f"  Testes    : {'[green]sim[/green]' if with_tests and not dry_run else '[dim]não[/dim]'}")
+    console.print(f"  LangSmith : {'[green]ativo ✅[/green]' if tracing_active else '[dim]desabilitado[/dim]'}")
     if nfr:
         console.print(f"  NFR       : {nfr}")
     console.print()
@@ -91,7 +96,18 @@ def main(
         with_tests=with_tests,
     )
 
-    result = pipeline.invoke(initial_state)
+    from datetime import datetime
+    project_name = Path(path).name
+    timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    result = pipeline.invoke(
+        initial_state,
+        config={
+            "run_name": f"sentinel-{project_name}-{timestamp}",
+            "tags":     get_run_tags(initial_state, dry_run=dry_run, with_iac=with_iac, with_benchmark=with_benchmark, with_tests=with_tests),
+            "metadata": get_run_metadata(initial_state),
+        }
+    )
 
     # ── Tabela de issues Java ──
     issues = result.get("issues", [])

@@ -10,10 +10,10 @@ antes de implementar qualquer coisa no projeto.
 Sistema multi-agente em Python que analisa, diagnostica e corrige
 automaticamente problemas de performance em:
 - Aplicações Java/Spring Boot (código-fonte)
-- Infraestrutura como Código (Terraform, K8s, CloudFormation)
+- Infraestrutura como Código (Terraform, K8s)
 
-Gera relatório HTML com causa raiz, severidade, diffs antes/depois
-e métricas de ganho de performance.
+Gera relatório HTML com causa raiz, severidade, diffs antes/depois,
+testes automatizados e métricas de ganho de performance.
 
 ---
 
@@ -26,8 +26,10 @@ Cada agente é um `StateGraph` com nós independentes e testáveis.
 ### Estado compartilhado
 `models/state.py` — `AgentState` (TypedDict) circula entre todos os agentes.
 Campos com `Annotated[List, operator.add]` são acumulativos entre nós.
-Campos com prefixo `_` (ex: `_enriched_issues`) são temporários e NÃO
-persistem entre nós do LangGraph — nunca usar para passar dados entre nós.
+
+**REGRA CRÍTICA:** campos temporários entre nós NUNCA podem ter prefixo `_`.
+O LangGraph não persiste campos desconhecidos no TypedDict entre nós.
+Todo campo que precisa ser passado entre nós deve estar declarado no AgentState.
 
 ### LLM
 - Principal: `gpt-4o` via `langchain-openai`
@@ -40,62 +42,79 @@ persistem entre nós do LangGraph — nunca usar para passar dados entre nós.
 
 ```
 sentinel-code/
-├── main.py                  # CLI entry point (Typer)
-├── config.py                # Settings via pydantic-settings
-├── CLAUDE.md                # Este arquivo
+├── main.py                      # CLI entry point (Typer)
+├── config.py                    # Settings via pydantic-settings
+├── CLAUDE.md                    # Este arquivo
 │
 ├── agents/
-│   ├── orchestrator.py      # Pipeline completo
-│   ├── code_analyzer.py     # Analisa Java/Spring Boot
-│   ├── fix_agent.py         # Aplica correções no código
-│   ├── reporter.py          # Gera relatório HTML
-│   ├── iac_analyzer.py      # (Fase 2) Analisa Terraform/K8s
-│   ├── iac_patcher.py       # (Fase 2) Corrige IaC
-│   ├── benchmark.py         # (Fase 2) Locust antes/depois
-│   └── test_agent.py        # (Fase 2) Gera testes funcionais
+│   ├── orchestrator.py          # Pipeline completo (flags: dry_run, with_iac, with_benchmark, with_tests)
+│   ├── code_analyzer.py         # Analisa Java/Spring Boot
+│   ├── fix_agent.py             # Aplica correções no código
+│   ├── reporter.py              # Gera relatório HTML
+│   ├── iac_analyzer.py          # Analisa Terraform/K8s
+│   ├── iac_patcher.py           # Corrige IaC
+│   ├── benchmark.py             # Locust antes/depois
+│   └── test_agent.py            # Gera testes funcionais
 │
 ├── models/
-│   ├── state.py             # AgentState — estado global
-│   └── issue.py             # Issue, Severity, IssueCategory
+│   ├── state.py                 # AgentState — estado global
+│   ├── issue.py                 # Issue, Severity, IssueCategory
+│   └── infra_gap.py             # InfraGap, InfraGapCategory
 │
 ├── tools/
 │   ├── java/
 │   │   ├── file_reader.py       # Lê .java e configs
 │   │   ├── issue_detectors.py   # Detectores estáticos
 │   │   └── code_patcher.py      # Aplica patches em arquivos
-│   └── iac/                     # (Fase 2)
-│       ├── terraform_parser.py
-│       ├── k8s_parser.py
-│       └── iac_patcher.py
+│   ├── iac/
+│   │   ├── file_reader.py       # Lê .tf, .yaml, .yml
+│   │   ├── gap_detectors.py     # Detectores de gaps de infra
+│   │   └── iac_patcher.py       # Aplica patches em IaC
+│   ├── benchmark/
+│   │   ├── models.py            # BenchmarkReport dataclass
+│   │   ├── comparator.py        # calculate_delta, validate_slas, compare_benchmarks
+│   │   ├── script_generator.py  # Gera script Locust
+│   │   └── runner.py            # check_url_available, run_benchmark
+│   └── test_gen/
+│       ├── planner.py           # plan_tests, extract_endpoints
+│       └── code_generator.py    # generate_test_code, generate_conftest
 │
-├── templates/
-│   └── report.html.j2       # Template Jinja2 do relatório
-│
-├── specs/                   # Spec Driven Development
+├── specs/                       # Spec Driven Development
 │   ├── agents/
-│   │   ├── code_analyzer.md
-│   │   ├── fix_agent.md
-│   │   ├── iac_analyzer.md  # (Fase 2)
-│   │   └── benchmark.md     # (Fase 2)
+│   │   ├── iac_analyzer.md
+│   │   ├── iac_patcher.md
+│   │   ├── benchmark.md
+│   │   └── test_agent.md
 │   └── tools/
-│       ├── detectors.md
-│       └── patchers.md
+│       └── detectors.md
 │
-├── sample_project/          # Projeto Java de exemplo para testes
-└── outputs/                 # Relatórios gerados (gitignored)
+├── tests/unit/
+│   ├── test_iac_detectors.py    # 24 testes
+│   ├── test_iac_file_reader.py  # 16 testes
+│   ├── test_iac_analyzer_agent.py # 10 testes
+│   ├── test_iac_patcher.py      # 17 testes
+│   ├── test_benchmark.py        # 22 testes
+│   └── test_test_agent.py       # 20 testes (+ ~15 Fase 1)
+│
+├── sample_project/              # Projeto Java de exemplo para testes
+└── outputs/                     # Relatórios gerados (gitignored)
 ```
 
 ---
 
-## ✅ O que já foi implementado (Fase 1)
+## ✅ Status de implementação
 
 ### Agentes
-| Agente | Arquivo | Status |
-|--------|---------|--------|
-| Code Analyzer | `agents/code_analyzer.py` | ✅ |
-| Fix Agent | `agents/fix_agent.py` | ✅ |
-| Reporter | `agents/reporter.py` | ✅ |
-| Orchestrator | `agents/orchestrator.py` | ✅ |
+| Agente | Arquivo | Nós | Status |
+|--------|---------|-----|--------|
+| Code Analyzer | `agents/code_analyzer.py` | read_files → detect_issues → enrich_with_llm | ✅ |
+| Fix Agent | `agents/fix_agent.py` | plan_fixes → apply_fixes → validate_fixes | ✅ |
+| Reporter | `agents/reporter.py` | build_report_data → render_report | ✅ |
+| IaC Analyzer | `agents/iac_analyzer.py` | read_iac_files → detect_infra_gaps → enrich_iac_with_llm | ✅ |
+| IaC Patcher | `agents/iac_patcher.py` | plan_iac_patches → apply_iac_patches → validate_iac_patches | ✅ |
+| Benchmark Agent | `agents/benchmark.py` | setup_benchmark → run_before → run_after → compare_benchmarks | ✅ |
+| Test Agent | `agents/test_agent.py` | plan_tests → generate_tests → run_tests | ✅ |
+| Orchestrator | `agents/orchestrator.py` | pipeline dinâmico com 4 flags | ✅ |
 
 ### Detectores Java (`tools/java/issue_detectors.py`)
 | Detector | Método | Status |
@@ -104,12 +123,42 @@ sentinel-code/
 | Cache Ausente | Heurística @GetMapping | ✅ |
 | Connection Pool | Parse application.properties/yml | ✅ |
 
-### Fixes automáticos (`agents/fix_agent.py`)
-| Fix | Estratégia | Status |
-|-----|-----------|--------|
-| N+1 Query | Extrai snippet por linha + LLM corrige | ✅ |
-| Cache Ausente | Insere @Cacheable cirurgicamente (sem LLM) | ✅ |
-| Connection Pool | Cria/atualiza application.yml (sem LLM) | ✅ |
+### Detectores IaC (`tools/iac/gap_detectors.py`)
+| Detector | Recurso | Status |
+|----------|---------|--------|
+| Missing Autoscaling | ECS / K8s Deployment | ✅ |
+| Single AZ | RDS multi_az=false | ✅ |
+| Undersized Instance | instance_type vs max_rps | ✅ |
+
+### Estratégias de patch IaC (`tools/iac/iac_patcher.py`)
+| Estratégia | Uso | Status |
+|------------|-----|--------|
+| append_block | Adiciona bloco HCL (ECS autoscaling) | ✅ |
+| modify_attribute | Altera atributo em-linha (multi_az) | ✅ |
+| append_file | Cria novo arquivo (K8s HPA yaml) | ✅ |
+
+---
+
+## 🔄 Pipeline completo
+
+```
+read_files → detect_issues → enrich_with_llm
+  → [plan_fixes → apply_fixes → validate_fixes]        # se não dry_run
+  → [read_iac_files → detect_infra_gaps                # se with_iac
+     → enrich_iac_with_llm
+     → plan_iac_patches → apply_iac_patches             # se não dry_run
+     → validate_iac_patches]
+  → [setup_benchmark → run_before → run_after          # se with_benchmark
+     → compare_benchmarks]
+  → [plan_tests → generate_tests → run_tests]          # se with_tests e não dry_run
+  → build_report_data → render_report → END
+```
+
+Flags do `build_full_pipeline()`:
+- `dry_run=False` — pula Fix Agent, IaC Patcher e Test Agent
+- `with_iac=True` — inclui IaC Analyzer + Patcher
+- `with_benchmark=False` — inclui Benchmark Agent (requer target_url)
+- `with_tests=True` — inclui Test Agent
 
 ---
 
@@ -124,71 +173,67 @@ sentinel-code/
 **Motivo:** LLM gera código com imports extras, reescreve indentação,
 adiciona comentários — tudo isso quebra o patch por substituição de string.
 
-### Validação de fixes
+### Validação de fixes Java
 **Regra:** comparar balanço de chaves antes vs depois do patch.
 Se `brace_balance(after) >= brace_balance(before)` → fix válido.
 
 **Motivo:** `javalang.parse` é muito estrito e falha em arquivos
-Java incompletos (sem package, sem imports). A validação por balanço
-de chaves é pragmática e funciona em qualquer arquivo.
+Java incompletos (sem package, sem imports).
+
+### python-hcl2 retorna List[dict]
+**Bug recorrente:** `python-hcl2` retorna `resource` como `List[dict]`, não `dict`.
+`_collect_all_resources()` em `tools/iac/gap_detectors.py` trata ambos os formatos.
+
+### IaC Patcher — formato do resource_name
+**Bug recorrente:** `_resolve_strategy()` deve tratar dois formatos:
+- `"aws_ecs_service.api"` → split por `.`
+- `"Deployment/api"` → split por `/`
 
 ### Campos temporários no AgentState
-**Regra:** NUNCA passar dados entre nós via campos com prefixo `_`.
-O LangGraph não persiste campos desconhecidos no TypedDict entre nós.
-
-**Motivo:** bug recorrente na Fase 1 — `_fixable_issues` e `_report_context`
-foram perdidos entre nós e causaram execuções vazias.
-
-**Solução:** ou declarar o campo no `AgentState`, ou fundir os nós
-que precisam compartilhar dados temporários (como foi feito no Reporter).
-
-### Snippet original para patches
-**Regra:** extrair o snippet DIRETAMENTE do arquivo por número de linha,
-nunca via LLM ou via `before_code` do enriquecimento.
-
-**Motivo:** o LLM sempre reescreve levemente o código ao "copiar" —
-isso quebra a substituição de string. A extração direta garante
-correspondência exata.
+**REGRA CRÍTICA:** NUNCA passar dados entre nós via campos não declarados.
+Exemplo de bug: `_test_plan` foi perdido entre `plan_tests_node` e `generate_tests_node`.
+Solução: declarar `test_plan: List[dict]` no AgentState.
 
 ---
 
-## 🔄 Pipeline completo (Fase 1)
+## 🗺️ Roadmap de Implementação
 
-```
-read_files → detect_issues → enrich_with_llm
-    → plan_fixes → apply_fixes → validate_fixes
-    → generate_report → END
-```
+### Fase 1 — MVP ✅ CONCLUÍDA
+- [x] Setup do projeto, config, CLI básica
+- [x] Code Analyzer Agent (N+1, missing cache, connection pool)
+- [x] Fix Agent (fixes cirúrgicos + validação + rollback automático)
+- [x] Reporter Agent (relatório HTML com diffs visuais antes/depois)
+- [x] Orchestrator (pipeline completo integrado)
 
-Montado dinamicamente em `main.py` usando `StateGraph(AgentState)`.
-O `orchestrator.py` tem a versão completa sempre-com-fixes.
+### Fase 2 — Core ✅ CONCLUÍDA
+- [x] IaC Analyzer Agent (Terraform — python-hcl2)
+- [x] IaC Patcher Agent (altera .tf com justificativa)
+- [x] Benchmark Agent (Locust integrado programaticamente)
+- [x] Test Agent (geração de testes funcionais)
+
+### Fase 3 — Expansão
+- [ ] Suporte a K8s manifests
+- [ ] Suporte a CloudFormation
+- [ ] Simulação de custo AWS
+- [ ] Relatório PDF executivo
+- [ ] LangSmith observabilidade completa
+- [ ] Mais detectores Java (Missing Index, Lazy Loading, Thread Blocking)
 
 ---
 
-## 🚀 Próximos passos (Fase 2)
+## 📊 Suite de testes (104 testes passando)
 
-### IaC Analyzer Agent
-- Parser Terraform: `python-hcl2`
-- Parser K8s: `pyyaml`
-- Detectores: ausência de autoscaling, instâncias subdimensionadas,
-  single-AZ, falta de CDN, connection limits
-- Spec: `specs/agents/iac_analyzer.md`
-
-### IaC Patcher Agent
-- Modifica blocos HCL/YAML com justificativa inline
-- Gera diffs dos arquivos `.tf` / `.yaml`
-- Spec: `specs/agents/iac_patcher.md` (a criar)
-
-### Benchmark Agent
-- Locust programático (sem subprocess)
-- Coleta métricas antes e depois dos fixes
-- Compara P50/P95/P99/RPS/Error Rate
-- Spec: `specs/agents/benchmark.md`
-
-### Test Agent
-- Gera testes funcionais com RestAssured
-- Valida SLAs definidos nos requisitos não funcionais
-- Spec: `specs/agents/test_agent.md` (a criar)
+```
+tests/unit/test_iac_detectors.py       → 16 testes  ✅
+tests/unit/test_iac_file_reader.py     → 16 testes  ✅
+tests/unit/test_iac_analyzer_agent.py  → 10 testes  ✅
+tests/unit/test_iac_patcher.py         → 17 testes  ✅
+tests/unit/test_benchmark.py           → 22 testes  ✅
+tests/unit/test_test_agent.py          → 20 testes  ✅
++ testes Fase 1                        →  3 testes  ✅
+─────────────────────────────────────────────────────
+Total                                  → 104 testes ✅
+```
 
 ---
 
@@ -200,11 +245,20 @@ python -m venv .venv
 .venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 
-# Análise completa
+# Pipeline completo
 python main.py --path .\sample_project\
 
-# Só análise, sem aplicar fixes
+# Só análise, sem fixes
 python main.py --path .\sample_project\ --dry-run
+
+# Sem análise de IaC
+python main.py --path .\sample_project\ --no-iac
+
+# Com benchmark + NFRs
+python main.py --path .\sample_project\ --benchmark --nfr '{"target_url":"http://localhost:8080","p99_latency_ms":200}'
+
+# Rodar todos os testes
+pytest tests/ -v
 ```
 
 ---
