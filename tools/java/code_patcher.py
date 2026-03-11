@@ -91,10 +91,11 @@ def apply_patch(
             ),
         )
 
-    # Faz backup se solicitado
+    # Faz backup se solicitado (apenas se ainda não existe, para preservar o original)
     if backup:
         backup_path = file_path.with_suffix(file_path.suffix + ".bak")
-        shutil.copy2(file_path, backup_path)
+        if not backup_path.exists():
+            shutil.copy2(file_path, backup_path)
 
     # Aplica a correção
     patched_content = original_content.replace(
