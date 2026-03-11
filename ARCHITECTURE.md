@@ -419,24 +419,26 @@ SLA Validation:    ✅ P99 < 200ms atingido | ✅ RPS > 5.000 atingido
 
 ## 🗺️ Roadmap de Implementação
 
-### Fase 1 — MVP (4 semanas)
+### Fase 1 — MVP 
 - [x] Setup do projeto, config, CLI básica
-- [x] Code Analyzer Agent (detectores principais: N+1, missing cache, pool)
-- [x] Fix Agent (3-5 fixes automáticos)
-- [ ] Reporter Agent (relatório Markdown)
+- [x] Code Analyzer Agent (N+1, missing cache, connection pool)
+- [x] Fix Agent (fixes cirúrgicos + validação + rollback automático)
+- [x] Reporter Agent (relatório HTML com diffs visuais antes/depois)
+- [x] Orchestrator (pipeline completo integrado)
 
-### Fase 2 — Core (4 semanas)
-- [ ] IaC Analyzer Agent (Terraform)
-- [ ] IaC Patcher Agent
-- [ ] Benchmark Agent (Locust integrado)
+### Fase 2 — Core 
+- [ ] IaC Analyzer Agent (Terraform — python-hcl2)
+- [ ] IaC Patcher Agent (altera .tf com justificativa)
+- [ ] Benchmark Agent (Locust integrado programaticamente)
 - [ ] Test Agent (geração de testes funcionais)
 
-### Fase 3 — Expansão (4 semanas)
+### Fase 3 — Expansão
 - [ ] Suporte a K8s manifests
 - [ ] Suporte a CloudFormation
 - [ ] Simulação de custo AWS
 - [ ] Relatório PDF executivo
 - [ ] LangSmith observabilidade completa
+- [ ] Mais detectores Java (Missing Index, Lazy Loading, Thread Blocking)
 
 ---
 
