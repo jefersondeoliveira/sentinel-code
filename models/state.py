@@ -24,6 +24,11 @@ class AgentState(TypedDict):
     # --- Fase de correção ---
     applied_fixes: Annotated[List[dict], operator.add]
 
+    # --- Test Agent ---
+    test_plan:       List[dict]
+    generated_tests: Annotated[List[dict], operator.add]
+    test_results:    Optional[dict]
+
     # --- Relatório final ---
     final_report: Optional[str]
 

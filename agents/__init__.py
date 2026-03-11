@@ -5,6 +5,7 @@ from agents.orchestrator import build_full_pipeline
 from agents.iac_analyzer import build_iac_analyzer_graph, read_iac_files_node, detect_infra_gaps_node
 from agents.iac_patcher import build_iac_patcher_graph, plan_iac_patches_node, apply_iac_patches_node, validate_iac_patches_node
 from agents.benchmark import build_benchmark_graph
+from agents.test_agent import build_test_agent_graph
 
 __all__ = [
     "build_code_analyzer_graph",
@@ -19,4 +20,5 @@ __all__ = [
     "apply_iac_patches_node",
     "validate_iac_patches_node",
     "build_benchmark_graph",
+    "build_test_agent_graph",
 ]

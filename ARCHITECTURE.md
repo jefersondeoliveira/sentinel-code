@@ -430,7 +430,7 @@ SLA Validation:    ✅ P99 < 200ms atingido | ✅ RPS > 5.000 atingido
 - [x] IaC Analyzer Agent (Terraform — python-hcl2)
 - [x] IaC Patcher Agent (altera .tf com justificativa)
 - [x] Benchmark Agent (Locust integrado programaticamente)
-- [ ] Test Agent (geração de testes funcionais)
+- [x] Test Agent (geração de testes funcionais)
 
 ### Fase 3 — Expansão
 - [ ] Suporte a K8s manifests
