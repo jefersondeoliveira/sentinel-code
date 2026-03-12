@@ -207,26 +207,43 @@ Solução: declarar `test_plan: List[dict]` no AgentState.
 
 ## 🗺️ Roadmap de Implementação
 
-### Fase 1 — MVP ✅ CONCLUÍDA
-- [x] Setup do projeto, config, CLI básica
-- [x] Code Analyzer Agent (N+1, missing cache, connection pool)
-- [x] Fix Agent (fixes cirúrgicos + validação + rollback automático)
+### Fase 1 — MVP ✅
+- [x] Setup do projeto, config e CLI básica
+- [x] Code Analyzer Agent (N+1, cache ausente, connection pool)
+- [x] Fix Agent (fixes cirúrgicos com backup e rollback automático)
 - [x] Reporter Agent (relatório HTML com diffs visuais antes/depois)
 - [x] Orchestrator (pipeline completo integrado)
 
-### Fase 2 — Core ✅ CONCLUÍDA
+### Fase 2 — Core ✅
 - [x] IaC Analyzer Agent (Terraform — python-hcl2)
-- [x] IaC Patcher Agent (altera .tf com justificativa)
+- [x] IaC Patcher Agent (altera `.tf` com justificativa)
 - [x] Benchmark Agent (Locust integrado programaticamente)
 - [x] Test Agent (geração de testes funcionais)
 
-### Fase 3 — Expansão ✅ PARCIALMENTE CONCLUÍDA
-- [x] Suporte a K8s manifests (detect_k8s_missing_resource_limits, detect_k8s_missing_probes, modify_yaml)
+### Fase 3 — Expansão ✅ Parcial
+- [x] Suporte a K8s manifests (resource limits, health probes, modify_yaml)
+- [x] Relatório PDF executivo (`--pdf` flag + WeasyPrint com fallback HTML)
+- [x] Observabilidade com LangSmith (tracing completo do pipeline)
+- [x] Mais detectores Java: PAGINATION, LAZY_LOADING, THREAD_BLOCKING, MISSING_INDEX
 - [ ] Suporte a CloudFormation
-- [ ] Simulação de custo AWS
-- [x] Relatório PDF executivo (--pdf flag + WeasyPrint com fallback HTML)
-- [x] LangSmith observabilidade completa
-- [x] Mais detectores Java (PAGINATION, LAZY_LOADING, THREAD_BLOCKING, MISSING_INDEX)
+- [ ] Simulação de custo AWS via Pricing API
+
+### Fase 4 — Inteligência Avançada
+- [ ] Suporte a CloudFormation (pendente da Fase 3)
+- [ ] Simulação de custo AWS via Pricing API (pendente da Fase 3)
+- [ ] Suporte a Helm charts
+- [ ] Fix Agent com LLM para PAGINATION, LAZY_LOADING e MISSING_INDEX (hoje só reporta)
+- [ ] Suporte a Gradle além de Maven
+- [ ] Detecção de vulnerabilidades OWASP Top 10 em código Java
+- [ ] Multi-linguagem: Node.js/Express, Python/FastAPI
+
+### Fase 5 — Plataforma
+- [ ] Interface web com dashboard de relatórios históricos
+- [ ] Integração CI/CD: GitHub Actions + GitLab CI (analisa PR antes do merge)
+- [ ] Análise incremental (só arquivos modificados no diff/PR)
+- [ ] Notificações via Slack e e-mail ao término do pipeline
+- [ ] Comparativo temporal: evolução de issues entre execuções
+- [ ] Multi-projeto: analisa monorepos e múltiplos serviços em paralelo
 
 ---
 
