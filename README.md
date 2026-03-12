@@ -240,6 +240,7 @@ sentinel-code/
 - [x] Relatório PDF executivo (`--pdf` flag + WeasyPrint com fallback HTML)
 - [x] Observabilidade com LangSmith (tracing completo do pipeline)
 - [x] Mais detectores Java: PAGINATION, LAZY_LOADING, THREAD_BLOCKING, MISSING_INDEX
+- [x] Terminal UI rica (`ui/progress.py` — Rich.Live, painéis animados por agente, cards de métricas finais)
 - [ ] Suporte a CloudFormation
 - [ ] Simulação de custo AWS via Pricing API
 
