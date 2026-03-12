@@ -17,6 +17,7 @@ from rich         import box
 from models.state import AgentState
 from tools.observability.tracer import setup_tracing, get_run_tags, get_run_metadata
 from config import settings
+from ui import PipelineUI
 
 from pathlib import Path
 
@@ -96,55 +97,38 @@ def main(
         "messages":                    [],
     }
 
+    ui = PipelineUI()
+
     pipeline = build_full_pipeline(
         dry_run=dry_run,
         with_iac=with_iac,
         with_benchmark=with_benchmark,
         with_tests=with_tests,
+        ui=ui,
     )
 
     from datetime import datetime
     project_name = Path(path).name
     timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    result = pipeline.invoke(
-        initial_state,
-        config={
-            "run_name": f"sentinel-{project_name}-{timestamp}",
-            "tags":     get_run_tags(initial_state, dry_run=dry_run, with_iac=with_iac, with_benchmark=with_benchmark, with_tests=with_tests),
-            "metadata": get_run_metadata(initial_state),
-        }
-    )
+    result = None
+    try:
+        result = pipeline.invoke(
+            initial_state,
+            config={
+                "run_name": f"sentinel-{project_name}-{timestamp}",
+                "tags":     get_run_tags(initial_state, dry_run=dry_run, with_iac=with_iac, with_benchmark=with_benchmark, with_tests=with_tests),
+                "metadata": get_run_metadata(initial_state),
+            }
+        )
+    finally:
+        ui.close()
 
-    # ── Tabela de issues Java ──
-    issues = result.get("issues", [])
-    if issues:
-        _print_issues_table(issues)
+    if result is None:
+        return
 
-    # ── Tabela de gaps IaC ──
-    infra_gaps = result.get("infra_gaps", [])
-    if infra_gaps:
-        _print_infra_gaps_table(infra_gaps)
-
-    # ── Tabela de fixes ──
-    if not dry_run:
-        fixes = _deduplicate(result.get("applied_fixes", []))
-        if fixes:
-            _print_fixes_table(fixes)
-
-    # ── Testes gerados ──
-    generated_tests = result.get("generated_tests", [])
-    if generated_tests:
-        _print_tests_table(generated_tests)
-
-    # ── Link do relatório ──
-    report_path = result.get("final_report")
-    if report_path:
-        console.print()
-        console.rule()
-        console.print(f"\n  📄 Relatório: [bold cyan]{Path(report_path).resolve()}[/bold cyan]")
-        hint = "Abra o PDF no seu visualizador" if pdf else "Abra o arquivo HTML no seu navegador"
-        console.print(f"  💡 {hint}\n")
+    # ── Cards de métricas e alertas finais ──
+    ui.render_summary(result, with_iac=with_iac, with_benchmark=with_benchmark)
 
 
 # =============================================================================

@@ -10,6 +10,8 @@ Fluxo:
   3. validate_fixes_node → verifica que o patch não introduziu novos problemas
 """
 
+from __future__ import annotations
+
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
@@ -18,6 +20,21 @@ from config import settings
 from models.state import AgentState
 from models.issue import Issue, IssueCategory
 from tools.java.code_patcher import apply_patch, apply_config_patch
+
+# ── UI (opcional) ─────────────────────────────────────────────────────────────
+_ui: "PipelineUI | None" = None  # type: ignore[name-defined]  # noqa: F821
+
+
+def set_ui(ui) -> None:
+    global _ui
+    _ui = ui
+
+
+def _log(msg: str) -> None:
+    if _ui:
+        _ui.log(msg)
+    else:
+        print(msg)
 
 
 # Categorias com fix automático implementado
@@ -36,18 +53,25 @@ def plan_fixes_node(state: AgentState) -> dict:
     """
     Nó 1: separa issues fixáveis dos que precisam de intervenção manual.
     """
-    print("\n🗂️  [1/3] Planejando correções...")
+    if _ui:
+        _ui.agent_start("FIX AGENT", ["plan_fixes", "apply_fixes", "validate_fixes"])
+        _ui.node_start("plan_fixes")
+    else:
+        print("\n🗂️  [1/3] Planejando correções...")
 
     issues  = state.get("_enriched_issues") or state.get("issues", [])
     fixable = [i for i in issues if i.category in FIXABLE_CATEGORIES]
     manual  = [i for i in issues if i.category not in FIXABLE_CATEGORIES]
 
     for i in fixable:
-        print(f"    ✅ Fixável automaticamente: {i.category.value}")
+        _log(f"✅ Fixável: {i.category.value}")
     for i in manual:
-        print(f"    ⚠️  Requer revisão manual: {i.category.value}")
+        _log(f"⚠️  Manual: {i.category.value}")
 
-    print(f"\n    Total fixável: {len(fixable)} | Manual: {len(manual)}")
+    _log(f"Total fixável: {len(fixable)} | Manual: {len(manual)}")
+
+    if _ui:
+        _ui.node_done("plan_fixes")
 
     return {
         "messages": [f"Planejamento: {len(fixable)} fixes automáticos, {len(manual)} manuais"],
@@ -63,14 +87,19 @@ def apply_fixes_node(state: AgentState) -> dict:
     - CONNECTION_POOL  → cria/atualiza application.yml (sem LLM)
     - N_PLUS_ONE       → extrai snippet pela linha + pede LLM só o código corrigido
     """
-    print("\n🛠️  [2/3] Aplicando correções...")
+    if _ui:
+        _ui.node_start("apply_fixes")
+    else:
+        print("\n🛠️  [2/3] Aplicando correções...")
 
     all_issues     = state.get("_enriched_issues") or state.get("issues", [])
     fixable_issues = [i for i in all_issues if i.category in FIXABLE_CATEGORIES]
     project_path   = state["project_path"]
 
     if not fixable_issues:
-        print("    ⚠️  Nenhum issue fixável encontrado.")
+        _log("⚠️  Nenhum issue fixável encontrado.")
+        if _ui:
+            _ui.node_done("apply_fixes")
         return {"applied_fixes": [], "messages": ["Nenhum fix aplicado."]}
 
     llm = ChatOpenAI(
@@ -83,25 +112,27 @@ def apply_fixes_node(state: AgentState) -> dict:
     applied_fixes = []
 
     for i, issue in enumerate(fixable_issues):
-        print(f"\n    [{i+1}/{len(fixable_issues)}] Corrigindo: {issue.category.value}")
-        print(f"    Arquivo: {issue.file_path}")
+        _log(f"[{i+1}/{len(fixable_issues)}] {issue.category.value} — {issue.file_path}")
 
         try:
             fix_record = _apply_single_fix(llm, issue, project_path, file_index)
 
             if fix_record["success"]:
                 applied_fixes.append(fix_record)
-                print(f"    ✅ Correção aplicada — {fix_record['diff_summary']}")
+                _log(f"✅ {fix_record['diff_summary']}")
                 # Atualiza índice para o próximo fix no mesmo arquivo
                 file_index[issue.file_path]                     = fix_record["after"]
                 file_index[issue.file_path.replace("\\", "/")] = fix_record["after"]
             else:
-                print(f"    ❌ Falha: {fix_record['error']}")
+                _log(f"❌ {fix_record['error']}")
 
         except Exception as e:
-            print(f"    ❌ Erro inesperado: {e}")
+            _log(f"❌ Erro: {e}")
 
-    print(f"\n    ✅ {len(applied_fixes)}/{len(fixable_issues)} correção(ões) aplicada(s)")
+    _log(f"✅ {len(applied_fixes)}/{len(fixable_issues)} correção(ões) aplicada(s)")
+
+    if _ui:
+        _ui.node_done("apply_fixes")
 
     return {
         "applied_fixes": applied_fixes,
@@ -118,7 +149,10 @@ def validate_fixes_node(state: AgentState) -> dict:
     Se ficou igual ou melhorou, o fix é válido — mesmo em arquivos
     intencionalmente incompletos como os do sample_project.
     """
-    print("\n✔️  [3/3] Validando correções...")
+    if _ui:
+        _ui.node_start("validate_fixes")
+    else:
+        print("\n✔️  [3/3] Validando correções...")
 
     applied_fixes = state.get("applied_fixes", [])
     project_path  = state["project_path"]
@@ -131,7 +165,7 @@ def validate_fixes_node(state: AgentState) -> dict:
         # Config files não precisam de validação Java
         if fp.endswith(".yml") or fp.endswith(".properties"):
             validated.append(fix)
-            print(f"    ✅ Config válida: {fp}")
+            _log(f"✅ Config válida: {fp}")
             continue
 
         before_balance = _brace_balance(fix.get("before", ""))
@@ -140,15 +174,19 @@ def validate_fixes_node(state: AgentState) -> dict:
         # O patch é válido se não piorou o balanço de chaves
         if after_balance >= before_balance:
             validated.append(fix)
-            print(f"    ✅ Java válido: {fp}")
+            _log(f"✅ Java válido: {fp}")
         else:
             from tools.java.code_patcher import restore_backup
             rel_path = fp.replace(str(project_path), "").lstrip("/\\")
             restore_backup(project_path, rel_path)
             reverted.append(fix)
-            print(f"    ⚠️  Patch introduziu chaves desbalanceadas — backup restaurado: {fp}")
+            _log(f"⚠️  Backup restaurado: {fp}")
 
-    print(f"\n    Validados: {len(validated)} | Revertidos: {len(reverted)}")
+    _log(f"Validados: {len(validated)} | Revertidos: {len(reverted)}")
+
+    if _ui:
+        _ui.node_done("validate_fixes")
+        _ui.agent_done(f"{len(validated)} fix(es) validado(s)")
 
     return {
         "applied_fixes": validated,

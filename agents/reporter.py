@@ -9,6 +9,8 @@ já coletados pelos agentes anteriores. Rápido e sem custo de API.
 Saída: arquivo HTML salvo em ./outputs/report_<timestamp>.html
 """
 
+from __future__ import annotations
+
 import os
 from datetime import datetime
 from pathlib import Path
@@ -19,13 +21,32 @@ from langgraph.graph import StateGraph, END
 from models.state import AgentState
 from models.issue import Severity
 
+# ── UI (opcional) ─────────────────────────────────────────────────────────────
+_ui: "PipelineUI | None" = None  # type: ignore[name-defined]  # noqa: F821
+
+
+def set_ui(ui) -> None:
+    global _ui
+    _ui = ui
+
+
+def _log(msg: str) -> None:
+    if _ui:
+        _ui.log(msg)
+    else:
+        print(msg)
+
 
 def generate_report_node(state: AgentState) -> dict:
     """
     Nó único: prepara os dados e renderiza o relatório HTML em um passo só.
     Evita o problema de campos temporários não persistidos entre nós.
     """
-    print("\n📊 [1/2] Preparando dados do relatório...")
+    if _ui:
+        _ui.agent_start("REPORTER", ["generate_report"])
+        _ui.node_start("generate_report")
+    else:
+        print("\n📊 [1/2] Preparando dados do relatório...")
 
     issues = state.get("_enriched_issues") or state.get("issues", [])
     fixes  = state.get("applied_fixes", [])
@@ -78,8 +99,8 @@ def generate_report_node(state: AgentState) -> dict:
         "messages":      state.get("messages", []),
     }
 
-    print(f"    ✅ {len(issues_data)} issue(s) | {len(unique_fixes)} fix(es) preparados")
-    print("\n📝 [2/2] Renderizando relatório HTML...")
+    _log(f"✅ {len(issues_data)} issue(s) | {len(unique_fixes)} fix(es) preparados")
+    _log("Renderizando relatório HTML...")
 
     templates_dir = Path(__file__).parent.parent / "templates"
     env = Environment(
@@ -98,20 +119,23 @@ def generate_report_node(state: AgentState) -> dict:
     final_path = str(output_html)
 
     if report_format == "pdf":
-        print("\n📄 [2/2] Gerando relatório PDF...")
+        _log("Gerando relatório PDF...")
         try:
             from weasyprint import HTML as WeasyHTML
             output_pdf = output_dir / f"report_{project_name}_{timestamp}.pdf"
             WeasyHTML(string=html_content).write_pdf(str(output_pdf))
             final_path = str(output_pdf)
-            print(f"    ✅ PDF salvo em: {output_pdf}")
+            _log(f"✅ PDF salvo em: {output_pdf}")
         except ImportError:
-            print("    ⚠️  weasyprint não instalado — usando relatório HTML.")
-            print("    💡 Instale com: pip install weasyprint")
+            _log("⚠️  weasyprint não instalado — usando HTML.")
         except Exception as e:
-            print(f"    ⚠️  Erro ao gerar PDF: {e} — usando relatório HTML.")
+            _log(f"⚠️  Erro ao gerar PDF: {e} — usando HTML.")
     else:
-        print(f"    ✅ Relatório HTML salvo em: {output_html}")
+        _log(f"✅ HTML salvo em: {output_html}")
+
+    if _ui:
+        _ui.node_done("generate_report")
+        _ui.agent_done(f"Relatório gerado: {Path(final_path).name}")
 
     return {
         "final_report": final_path,

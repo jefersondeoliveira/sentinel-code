@@ -80,16 +80,22 @@ sentinel-code/
 │       └── code_generator.py    # generate_test_code, generate_conftest
 │
 │
-├── tests/unit/
-│   ├── test_iac_detectors.py    # 16 testes
-│   ├── test_iac_file_reader.py  # 16 testes
-│   ├── test_iac_analyzer_agent.py # 10 testes
-│   ├── test_iac_patcher.py      # 22 testes
-│   ├── test_benchmark.py        # 22 testes
-│   ├── test_test_agent.py       # 20 testes
-│   ├── test_java_detectors.py   # 24 testes
-│   ├── test_k8s_detectors.py    # 14 testes
-│   └── test_tracer.py           # 22 testes
+├── ui/
+│   ├── __init__.py              # Exporta PipelineUI
+│   └── progress.py              # PipelineUI — Rich.Live panels, spinner, cards finais
+│
+├── tests/
+│   ├── conftest.py              # autouse fixture: reseta _ui globals entre testes
+│   └── unit/
+│       ├── test_iac_detectors.py    # 16 testes
+│       ├── test_iac_file_reader.py  # 16 testes
+│       ├── test_iac_analyzer_agent.py # 10 testes
+│       ├── test_iac_patcher.py      # 22 testes
+│       ├── test_benchmark.py        # 22 testes
+│       ├── test_test_agent.py       # 20 testes
+│       ├── test_java_detectors.py   # 24 testes
+│       ├── test_k8s_detectors.py    # 14 testes
+│       └── test_tracer.py           # 22 testes
 │
 ├── sample_project/              # Projeto Java de exemplo para testes
 └── outputs/                     # Relatórios gerados (gitignored)
@@ -203,6 +209,24 @@ Java incompletos (sem package, sem imports).
 Exemplo de bug: `_test_plan` foi perdido entre `plan_tests_node` e `generate_tests_node`.
 Solução: declarar `test_plan: List[dict]` no AgentState.
 
+### Terminal UI — padrão module-level injection
+**Implementação:** `ui/progress.py` — classe `PipelineUI` com `Rich.Live`.
+Cada módulo de agente expõe:
+```python
+_ui: "PipelineUI | None" = None
+def set_ui(ui) -> None: ...
+def _log(msg: str) -> None: ...  # roteia para ui.log() ou print()
+```
+O orchestrator chama `module.set_ui(ui)` em todos os módulos antes de montar o grafo.
+
+**Compatibilidade:** `ui=None` (padrão) mantém comportamento original com `print()` — todos os 169 testes passam sem modificação.
+
+**Exception safety:** `ui.close()` é chamado em bloco `finally` em `main.py`, garantindo que `Live.stop()` execute mesmo em caso de exceção.
+
+**Isolamento de testes:** `tests/conftest.py` tem fixture `autouse` que reseta todos os `_ui` globals antes e depois de cada teste.
+
+**NUNCA chamar `print()` dentro de `PipelineUI.log()`** — corrompe o layout do `Rich.Live`. Usar `self._live.update()` para atualizar o painel.
+
 ---
 
 ## 🗺️ Roadmap de Implementação
@@ -225,6 +249,7 @@ Solução: declarar `test_plan: List[dict]` no AgentState.
 - [x] Relatório PDF executivo (`--pdf` flag + WeasyPrint com fallback HTML)
 - [x] Observabilidade com LangSmith (tracing completo do pipeline)
 - [x] Mais detectores Java: PAGINATION, LAZY_LOADING, THREAD_BLOCKING, MISSING_INDEX
+- [x] Terminal UI rica (`ui/progress.py` — Rich.Live, painéis animados por agente, cards de métricas finais)
 - [ ] Suporte a CloudFormation
 - [ ] Simulação de custo AWS via Pricing API
 

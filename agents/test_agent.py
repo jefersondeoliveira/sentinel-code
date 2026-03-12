@@ -10,12 +10,29 @@ Fluxo:
   3. run_tests_node       → executa via pytest (se URL disponível)
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from langgraph.graph import StateGraph, END
 
 from models.state import AgentState
 from tools.test_gen.planner import plan_tests
 from tools.test_gen.code_generator import generate_test_code, generate_conftest
+
+# ── UI (opcional) ─────────────────────────────────────────────────────────────
+_ui: "PipelineUI | None" = None  # type: ignore[name-defined]  # noqa: F821
+
+
+def set_ui(ui) -> None:
+    global _ui
+    _ui = ui
+
+
+def _log(msg: str) -> None:
+    if _ui:
+        _ui.log(msg)
+    else:
+        print(msg)
 
 
 # Diretório base para testes gerados (relativo ao project_path)
@@ -27,11 +44,18 @@ TESTS_OUTPUT_DIR = "tests/generated"
 # =============================================================================
 
 def plan_tests_node(state: AgentState) -> dict:
-    print("\n📋 [1/3] Planejando testes...")
+    if _ui:
+        _ui.agent_start("TEST AGENT", ["plan_tests", "generate_tests", "run_tests"])
+        _ui.node_start("plan_tests")
+    else:
+        print("\n📋 [1/3] Planejando testes...")
 
     java_files = state.get("java_files", [])
     if not java_files:
-        print("    ⚠️  Nenhum arquivo Java — testes não gerados.")
+        _log("⚠️  Nenhum arquivo Java — testes não gerados.")
+        if _ui:
+            _ui.node_done("plan_tests")
+            _ui.agent_done("Sem arquivos Java")
         return {
             "generated_tests": [],
             "messages": ["Test Agent: sem arquivos Java para analisar."],
@@ -45,10 +69,11 @@ def plan_tests_node(state: AgentState) -> dict:
     regression  = sum(1 for p in plan if p["category"] == "regression")
     performance = sum(1 for p in plan if p["category"] == "performance")
 
-    print(f"    Funcionais:   {functional}")
-    print(f"    Regressão:    {regression}")
-    print(f"    Performance:  {performance}")
-    print(f"    Total: {len(plan)} teste(s) planejado(s)")
+    _log(f"Funcionais: {functional} | Regressão: {regression} | Performance: {performance}")
+    _log(f"Total: {len(plan)} teste(s) planejado(s)")
+
+    if _ui:
+        _ui.node_done("plan_tests")
 
     return {
         "test_plan": plan,   # era "_test_plan"
@@ -57,14 +82,19 @@ def plan_tests_node(state: AgentState) -> dict:
 
 
 def generate_tests_node(state: AgentState) -> dict:
-    print("\n✍️  [2/3] Gerando código dos testes...")
+    if _ui:
+        _ui.node_start("generate_tests")
+    else:
+        print("\n✍️  [2/3] Gerando código dos testes...")
 
     plan         = state.get("test_plan", [])
     nfr          = state.get("non_functional_requirements", {})
     project_path = state.get("project_path", "/tmp")
 
     if not plan:
-        print("    ⚠️  Plano vazio — nenhum teste gerado.")
+        _log("⚠️  Plano vazio — nenhum teste gerado.")
+        if _ui:
+            _ui.node_done("generate_tests")
         return {"generated_tests": [], "messages": ["Test Agent: plano vazio."]}
 
     output_dir = Path(project_path) / TESTS_OUTPUT_DIR
@@ -73,7 +103,7 @@ def generate_tests_node(state: AgentState) -> dict:
     # Gera conftest.py
     conftest_path = output_dir / "conftest.py"
     conftest_path.write_text(generate_conftest(nfr), encoding="utf-8")
-    print(f"    ✅ conftest.py gerado")
+    _log("✅ conftest.py gerado")
 
     generated = []
     by_category = {}
@@ -103,9 +133,12 @@ def generate_tests_node(state: AgentState) -> dict:
         }
         generated.append(test_entry)
         by_category[category] = by_category.get(category, 0) + 1
-        print(f"    ✅ [{category}] {filename}")
+        _log(f"✅ [{category}] {filename}")
 
-    print(f"\n    ✅ {len(generated)} arquivo(s) gerado(s) em {TESTS_OUTPUT_DIR}/")
+    _log(f"✅ {len(generated)} arquivo(s) gerado(s) em {TESTS_OUTPUT_DIR}/")
+
+    if _ui:
+        _ui.node_done("generate_tests")
 
     return {
         "generated_tests": generated,
@@ -114,13 +147,19 @@ def generate_tests_node(state: AgentState) -> dict:
 
 
 def run_tests_node(state: AgentState) -> dict:
-    print("\n🧪 [3/3] Executando testes gerados...")
+    if _ui:
+        _ui.node_start("run_tests")
+    else:
+        print("\n🧪 [3/3] Executando testes gerados...")
 
     nfr        = state.get("non_functional_requirements", {})
     target_url = nfr.get("target_url", "")
 
     if not target_url:
-        print("    ⚠️  target_url não informado — execução pulada.")
+        _log("⚠️  target_url não informado — execução pulada.")
+        if _ui:
+            _ui.node_done("run_tests")
+            _ui.agent_done("Execução pulada (sem target_url)")
         return {"messages": ["Test Agent: execução pulada (sem target_url)."]}
 
     generated    = state.get("generated_tests", [])
@@ -128,11 +167,15 @@ def run_tests_node(state: AgentState) -> dict:
     tests_dir    = Path(project_path) / TESTS_OUTPUT_DIR
 
     if not generated or not tests_dir.exists():
-        print("    ⚠️  Nenhum teste para executar.")
+        _log("⚠️  Nenhum teste para executar.")
+        if _ui:
+            _ui.node_done("run_tests")
+            _ui.agent_done("Nenhum teste para executar")
         return {"messages": ["Test Agent: nenhum teste para executar."]}
 
     try:
         import subprocess
+        _log("Executando pytest...")
         result = subprocess.run(
             ["python", "-m", "pytest", str(tests_dir), "-v", "--tb=short",
              f"--base-url={target_url}"],
@@ -141,7 +184,10 @@ def run_tests_node(state: AgentState) -> dict:
             timeout=120,
         )
         passed = "passed" in result.stdout
-        print(f"    {'✅' if passed else '❌'} pytest exit code: {result.returncode}")
+        _log(f"{'✅' if passed else '❌'} pytest exit code: {result.returncode}")
+        if _ui:
+            _ui.node_done("run_tests")
+            _ui.agent_done(f"pytest exit={result.returncode}")
         return {
             "test_results": {
                 "exit_code": result.returncode,
@@ -151,7 +197,10 @@ def run_tests_node(state: AgentState) -> dict:
             "messages": [f"Test Agent: testes executados (exit={result.returncode})"],
         }
     except Exception as e:
-        print(f"    ⚠️  Execução falhou: {e}")
+        _log(f"⚠️  Execução falhou: {e}")
+        if _ui:
+            _ui.node_done("run_tests")
+            _ui.agent_done(f"Execução falhou: {e}")
         return {"messages": [f"Test Agent: execução falhou — {e}"]}
 
 

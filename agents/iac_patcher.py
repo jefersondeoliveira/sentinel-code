@@ -9,10 +9,27 @@ Fluxo:
   3. validate_iac_patches_node → valida e atualiza flags
 """
 
+from __future__ import annotations
+
 from langgraph.graph import StateGraph, END
 from models.state import AgentState
 from tools.iac.iac_patcher import apply_iac_patch
 from models.infra_gap import InfraGap
+
+# ── UI (opcional) ─────────────────────────────────────────────────────────────
+_ui: "PipelineUI | None" = None  # type: ignore[name-defined]  # noqa: F821
+
+
+def set_ui(ui) -> None:
+    global _ui
+    _ui = ui
+
+
+def _log(msg: str) -> None:
+    if _ui:
+        _ui.log(msg)
+    else:
+        print(msg)
 
 
 # =============================================================================
@@ -20,41 +37,52 @@ from models.infra_gap import InfraGap
 # =============================================================================
 
 def plan_iac_patches_node(state: AgentState) -> dict:
-    print("\n🗂️  [1/3] Planejando patches IaC...")
+    if _ui:
+        _ui.agent_start("IAC PATCHER", ["plan_iac_patches", "apply_iac_patches", "validate_iac_patches"])
+        _ui.node_start("plan_iac_patches")
+    else:
+        print("\n🗂️  [1/3] Planejando patches IaC...")
 
     gaps = state.get("infra_gaps", [])
     fixable   = [g for g in gaps if not g.fix_applied]
     unfixable = [g for g in gaps if g.fix_applied]
 
-    print(f"    ✅ Patchável automaticamente: {len(fixable)}")
-    print(f"    ⏭️  Já corrigido / skip:       {len(unfixable)}")
+    _log(f"✅ Patchável automaticamente: {len(fixable)}")
+    _log(f"⏭️  Já corrigido / skip:       {len(unfixable)}")
+
+    if _ui:
+        _ui.node_done("plan_iac_patches")
 
     return {"messages": [f"IaC Patcher: {len(fixable)} gaps para aplicar"]}
 
 
 def apply_iac_patches_node(state: AgentState) -> dict:
-    print("\n🛠️  [2/3] Aplicando patches IaC...")
+    if _ui:
+        _ui.node_start("apply_iac_patches")
+    else:
+        print("\n🛠️  [2/3] Aplicando patches IaC...")
 
     gaps         = state.get("infra_gaps", [])
     project_path = state["project_path"]
     fixable      = [g for g in gaps if not g.fix_applied]
 
     if not fixable:
-        print("    ⚠️  Nenhum gap para aplicar.")
+        _log("⚠️  Nenhum gap para aplicar.")
+        if _ui:
+            _ui.node_done("apply_iac_patches")
         return {"applied_fixes": [], "messages": ["Nenhum patch IaC aplicado."]}
 
     applied_fixes = []
     updated_gaps  = list(gaps)
 
     for i, gap in enumerate(fixable):
-        print(f"\n    [{i+1}/{len(fixable)}] Corrigindo: {gap.category.value}")
-        print(f"    Recurso: {gap.resource}")
+        _log(f"[{i+1}/{len(fixable)}] {gap.category.value} — {gap.resource}")
 
         result = apply_iac_patch(gap, project_path)
         applied_fixes.append(result)
 
         if result["status"] == "applied":
-            print(f"    ✅ Patch aplicado")
+            _log("✅ Patch aplicado")
             # Atualiza o gap original com fix_applied=True
             idx = next(
                 (j for j, g in enumerate(updated_gaps) if g is gap),
@@ -64,12 +92,15 @@ def apply_iac_patches_node(state: AgentState) -> dict:
                 import dataclasses
                 updated_gaps[idx] = dataclasses.replace(gap, fix_applied=True)
         elif result["status"] == "skipped":
-            print(f"    ⏭️  Skip: {result.get('reason', '')}")
+            _log(f"⏭️  Skip: {result.get('reason', '')}")
         else:
-            print(f"    ❌ Falhou: {result.get('reason', '')}")
+            _log(f"❌ Falhou: {result.get('reason', '')}")
 
     applied_count = sum(1 for f in applied_fixes if f["status"] == "applied")
-    print(f"\n    ✅ {applied_count}/{len(fixable)} patch(es) aplicado(s)")
+    _log(f"✅ {applied_count}/{len(fixable)} patch(es) aplicado(s)")
+
+    if _ui:
+        _ui.node_done("apply_iac_patches")
 
     return {
         "applied_fixes": applied_fixes,
@@ -79,7 +110,10 @@ def apply_iac_patches_node(state: AgentState) -> dict:
 
 
 def validate_iac_patches_node(state: AgentState) -> dict:
-    print("\n✔️  [3/3] Validando patches IaC...")
+    if _ui:
+        _ui.node_start("validate_iac_patches")
+    else:
+        print("\n✔️  [3/3] Validando patches IaC...")
 
     fixes = state.get("applied_fixes", [])
     iac_fixes = [f for f in fixes if "strategy" in f]
@@ -88,7 +122,11 @@ def validate_iac_patches_node(state: AgentState) -> dict:
     skipped  = sum(1 for f in iac_fixes if f["status"] == "skipped")
     failed   = sum(1 for f in iac_fixes if f["status"] == "failed")
 
-    print(f"    Aplicados: {applied} | Skipped: {skipped} | Falhas: {failed}")
+    _log(f"Aplicados: {applied} | Skipped: {skipped} | Falhas: {failed}")
+
+    if _ui:
+        _ui.node_done("validate_iac_patches")
+        _ui.agent_done(f"{applied} patch(es) aplicado(s)")
 
     return {"messages": [f"Validação IaC: {applied} OK, {failed} falhas"]}
 
