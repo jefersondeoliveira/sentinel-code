@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: store/api:latest
+          ports:
+            - containerPort: 8080
+          # PROBLEMA: sem resources (requests/limits)
+          # → aciona K8S_MISSING_RESOURCE_LIMITS: pod pode consumir CPU/memória ilimitados
+          #   e causar instabilidade no node
+
+          # PROBLEMA: sem livenessProbe nem readinessProbe
+          # → aciona K8S_MISSING_PROBES: Kubernetes não consegue detectar falhas
+          #   nem controlar tráfego durante startup
+
+# PROBLEMA: sem HorizontalPodAutoscaler correspondente
+# → aciona MISSING_AUTOSCALING (K8s): deployment não escala automaticamente sob carga
+# Para corrigir: criar hpa.yaml com scaleTargetRef apontando para este Deployment

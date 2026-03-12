@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/store
+    username: store_user
+    password: store_pass
+    hikari:
+      # PROBLEMA: maximum-pool-size muito baixo (< 15)
+      # → aciona CONNECTION_POOL: recomendado = CPU_count * 2 + disk_spindles (mínimo 20)
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+server:
+  port: 8080
