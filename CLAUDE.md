@@ -79,22 +79,17 @@ sentinel-code/
 │       ├── planner.py           # plan_tests, extract_endpoints
 │       └── code_generator.py    # generate_test_code, generate_conftest
 │
-├── specs/                       # Spec Driven Development
-│   ├── agents/
-│   │   ├── iac_analyzer.md
-│   │   ├── iac_patcher.md
-│   │   ├── benchmark.md
-│   │   └── test_agent.md
-│   └── tools/
-│       └── detectors.md
 │
 ├── tests/unit/
-│   ├── test_iac_detectors.py    # 24 testes
+│   ├── test_iac_detectors.py    # 16 testes
 │   ├── test_iac_file_reader.py  # 16 testes
 │   ├── test_iac_analyzer_agent.py # 10 testes
-│   ├── test_iac_patcher.py      # 17 testes
+│   ├── test_iac_patcher.py      # 22 testes
 │   ├── test_benchmark.py        # 22 testes
-│   └── test_test_agent.py       # 20 testes (+ ~15 Fase 1)
+│   ├── test_test_agent.py       # 20 testes
+│   ├── test_java_detectors.py   # 24 testes
+│   ├── test_k8s_detectors.py    # 14 testes
+│   └── test_tracer.py           # 22 testes
 │
 ├── sample_project/              # Projeto Java de exemplo para testes
 └── outputs/                     # Relatórios gerados (gitignored)
@@ -244,10 +239,9 @@ tests/unit/test_iac_analyzer_agent.py  → 10 testes  ✅
 tests/unit/test_iac_patcher.py         → 22 testes  ✅  (+5 K8s YAML patcher)
 tests/unit/test_benchmark.py           → 22 testes  ✅
 tests/unit/test_test_agent.py          → 20 testes  ✅
-tests/unit/test_java_detectors.py      → 23 testes  ✅  (Fase 3 — novos)
+tests/unit/test_java_detectors.py      → 24 testes  ✅  (Fase 3 — novos)
 tests/unit/test_k8s_detectors.py       → 14 testes  ✅  (Fase 3 — novos)
-+ testes Fase 1                        →  3 testes  ✅
-+ testes tracer                        →  1 teste   ✅
+tests/unit/test_tracer.py              → 22 testes  ✅  (LangSmith observability)
 ─────────────────────────────────────────────────────
 Total                                  → 169 testes ✅
 ```
