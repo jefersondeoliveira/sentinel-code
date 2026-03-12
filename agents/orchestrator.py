@@ -35,9 +35,19 @@ Pipeline completo conectando todos os agentes em sequência:
   └──────────────────────────────────────────────────┘
 """
 
+from __future__ import annotations
+
 from langgraph.graph import StateGraph, END
 
 from models.state import AgentState
+
+import agents.code_analyzer as _code_analyzer
+import agents.fix_agent as _fix_agent
+import agents.iac_analyzer as _iac_analyzer
+import agents.iac_patcher as _iac_patcher
+import agents.benchmark as _benchmark
+import agents.test_agent as _test_agent
+import agents.reporter as _reporter
 
 from agents.code_analyzer import (
     read_files_node,
@@ -72,12 +82,23 @@ from agents.test_agent import (
 )
 from agents.reporter import generate_report_node
 
+_ALL_AGENT_MODULES = [
+    _code_analyzer,
+    _fix_agent,
+    _iac_analyzer,
+    _iac_patcher,
+    _benchmark,
+    _test_agent,
+    _reporter,
+]
+
 
 def build_full_pipeline(
     dry_run:        bool = False,
     with_iac:       bool = True,
     with_benchmark: bool = False,
     with_tests:     bool = True,
+    ui=None,
 ) -> StateGraph:
     """
     Monta o pipeline completo.
@@ -87,7 +108,12 @@ def build_full_pipeline(
         with_iac:       Inclui análise e patches de IaC.
         with_benchmark: Inclui Benchmark Agent (requer target_url no NFR).
         with_tests:     Inclui geração de testes automatizados.
+        ui:             PipelineUI opcional para output rico no terminal.
     """
+    # Injeta UI em todos os módulos de agente (None = fallback para print)
+    for mod in _ALL_AGENT_MODULES:
+        mod.set_ui(ui)
+
     graph = StateGraph(AgentState)
 
     # ── Code Analyzer ──

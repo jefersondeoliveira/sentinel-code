@@ -10,6 +10,8 @@ Fluxo:
   3. enrich_iac_with_llm_node → LLM enriquece cada gap com contexto real
 """
 
+from __future__ import annotations
+
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
@@ -25,6 +27,21 @@ from tools.iac.gap_detectors import (
     detect_k8s_missing_probes,
 )
 
+# ── UI (opcional) ─────────────────────────────────────────────────────────────
+_ui: "PipelineUI | None" = None  # type: ignore[name-defined]  # noqa: F821
+
+
+def set_ui(ui) -> None:
+    global _ui
+    _ui = ui
+
+
+def _log(msg: str) -> None:
+    if _ui:
+        _ui.log(msg)
+    else:
+        print(msg)
+
 
 # =============================================================================
 # NÓS DO GRAFO
@@ -32,20 +49,30 @@ from tools.iac.gap_detectors import (
 
 def read_iac_files_node(state: AgentState) -> dict:
     """Nó 1: lê todos os arquivos IaC do projeto."""
-    print("\n📂 [1/3] Lendo arquivos IaC...")
+    if _ui:
+        _ui.agent_start("IAC ANALYZER", ["read_iac_files", "detect_infra_gaps", "enrich_iac_with_llm"])
+        _ui.node_start("read_iac_files")
+    else:
+        print("\n📂 [1/3] Lendo arquivos IaC...")
 
     project_path = state["project_path"]
 
     try:
         iac_files = read_iac_files(project_path)
     except FileNotFoundError as e:
-        print(f"    ❌ {e}")
+        _log(f"❌ {e}")
+        if _ui:
+            _ui.node_done("read_iac_files")
+            _ui.agent_done("Nenhum arquivo IaC encontrado")
         return {"iac_files": [], "messages": [str(e)]}
 
     tf_count  = sum(1 for f in iac_files if f["type"] == "terraform")
     k8s_count = sum(1 for f in iac_files if f["type"] == "kubernetes")
 
-    print(f"    ✅ {tf_count} arquivo(s) Terraform | {k8s_count} arquivo(s) K8s")
+    _log(f"✅ {tf_count} arquivo(s) Terraform | {k8s_count} arquivo(s) K8s")
+
+    if _ui:
+        _ui.node_done("read_iac_files")
 
     return {
         "iac_files": iac_files,
@@ -55,39 +82,46 @@ def read_iac_files_node(state: AgentState) -> dict:
 
 def detect_infra_gaps_node(state: AgentState) -> dict:
     """Nó 2: roda os detectores estáticos."""
-    print("\n🔍 [2/3] Detectando gaps de infraestrutura...")
+    if _ui:
+        _ui.node_start("detect_infra_gaps")
+    else:
+        print("\n🔍 [2/3] Detectando gaps de infraestrutura...")
 
     iac_files = state.get("iac_files", [])
     nfr       = state.get("non_functional_requirements", {})
 
     if not iac_files:
-        print("    ⚠️  Nenhum arquivo IaC encontrado.")
+        _log("⚠️  Nenhum arquivo IaC encontrado.")
+        if _ui:
+            _ui.node_done("detect_infra_gaps")
         return {"infra_gaps": [], "messages": ["Nenhum arquivo IaC para analisar."]}
 
     gaps = []
 
     autoscaling_gaps = detect_missing_autoscaling(iac_files, nfr)
-    print(f"    Autoscaling Ausente:     {len(autoscaling_gaps)} gap(s)")
+    _log(f"Autoscaling Ausente:      {len(autoscaling_gaps)} gap(s)")
     gaps.extend(autoscaling_gaps)
 
     single_az_gaps = detect_single_az(iac_files, nfr)
-    print(f"    Single AZ:               {len(single_az_gaps)} gap(s)")
+    _log(f"Single AZ:                {len(single_az_gaps)} gap(s)")
     gaps.extend(single_az_gaps)
 
     undersized_gaps = detect_undersized_instance(iac_files, nfr)
-    print(f"    Instância Subdimensionada: {len(undersized_gaps)} gap(s)")
+    _log(f"Instância Subdimensionada: {len(undersized_gaps)} gap(s)")
     gaps.extend(undersized_gaps)
 
     k8s_resource_gaps = detect_k8s_missing_resource_limits(iac_files, nfr)
-    print(f"    K8s Resource Limits:       {len(k8s_resource_gaps)} gap(s)")
+    _log(f"K8s Resource Limits:       {len(k8s_resource_gaps)} gap(s)")
     gaps.extend(k8s_resource_gaps)
 
     k8s_probe_gaps = detect_k8s_missing_probes(iac_files, nfr)
-    print(f"    K8s Health Probes:         {len(k8s_probe_gaps)} gap(s)")
+    _log(f"K8s Health Probes:         {len(k8s_probe_gaps)} gap(s)")
     gaps.extend(k8s_probe_gaps)
 
-    print(f"    ─────────────────────────────")
-    print(f"    Total: {len(gaps)} gap(s) encontrado(s)")
+    _log(f"Total: {len(gaps)} gap(s) encontrado(s)")
+
+    if _ui:
+        _ui.node_done("detect_infra_gaps")
 
     return {
         "infra_gaps": gaps,
@@ -99,13 +133,19 @@ def enrich_iac_with_llm_node(state: AgentState) -> dict:
     """
     Nó 3: usa o LLM para enriquecer cada gap com análise do código real.
     """
-    print("\n🤖 [3/3] Enriquecendo gaps com análise do LLM...")
+    if _ui:
+        _ui.node_start("enrich_iac_with_llm")
+    else:
+        print("\n🤖 [3/3] Enriquecendo gaps com análise do LLM...")
 
     gaps      = state.get("infra_gaps", [])
     iac_files = state.get("iac_files", [])
 
     if not gaps:
-        print("    ⚠️  Nenhum gap para enriquecer.")
+        _log("⚠️  Nenhum gap para enriquecer.")
+        if _ui:
+            _ui.node_done("enrich_iac_with_llm")
+            _ui.agent_done("Nenhum gap IaC encontrado")
         return {"messages": ["Nenhum gap IaC para enriquecer."]}
 
     llm = ChatOpenAI(
@@ -118,7 +158,7 @@ def enrich_iac_with_llm_node(state: AgentState) -> dict:
     enriched   = []
 
     for i, gap in enumerate(gaps):
-        print(f"    Analisando gap {i+1}/{len(gaps)}: {gap.category.value}...")
+        _log(f"Gap {i+1}/{len(gaps)}: {gap.category.value}...")
 
         snippet  = _extract_iac_snippet(file_index, gap)
         prompt   = _build_iac_enrichment_prompt(gap, snippet)
@@ -127,10 +167,14 @@ def enrich_iac_with_llm_node(state: AgentState) -> dict:
             response = llm.invoke([HumanMessage(content=prompt)])
             enriched.append(_parse_iac_enrichment(response.content, gap))
         except Exception as e:
-            print(f"    ⚠️  LLM falhou: {e}")
+            _log(f"⚠️  LLM falhou: {e}")
             enriched.append(gap)
 
-    print(f"\n    ✅ {len(enriched)} gap(s) enriquecido(s)")
+    _log(f"✅ {len(enriched)} gap(s) enriquecido(s)")
+
+    if _ui:
+        _ui.node_done("enrich_iac_with_llm")
+        _ui.agent_done(f"{len(enriched)} gap(s) enriquecido(s)")
 
     return {
         "_enriched_gaps": enriched,

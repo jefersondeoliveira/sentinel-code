@@ -10,6 +10,8 @@ Orquestra a análise de um projeto Java/Spring Boot em 3 etapas:
 Retorna o AgentState com `issues` preenchidos, prontos para o Fix Agent.
 """
 
+from __future__ import annotations
+
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
@@ -28,6 +30,21 @@ from tools.java.issue_detectors import (
     detect_missing_index,
 )
 
+# ── UI (opcional) ─────────────────────────────────────────────────────────────
+_ui: "PipelineUI | None" = None  # type: ignore[name-defined]  # noqa: F821
+
+
+def set_ui(ui) -> None:
+    global _ui
+    _ui = ui
+
+
+def _log(msg: str) -> None:
+    if _ui:
+        _ui.log(msg)
+    else:
+        print(msg)
+
 
 # =============================================================================
 # NÓS DO GRAFO
@@ -43,15 +60,22 @@ def read_files_node(state: AgentState) -> dict:
     Separar I/O da análise facilita testar e trocar a fonte de dados
     no futuro (ex: ler de um ZIP, de um repositório Git remoto, etc.)
     """
-    print("\n📂 [1/3] Lendo arquivos do projeto...")
+    if _ui:
+        _ui.agent_start("CODE ANALYZER", ["read_files", "detect_issues", "enrich_with_llm"])
+        _ui.node_start("read_files")
+    else:
+        print("\n📂 [1/3] Lendo arquivos do projeto...")
 
     project_path = state["project_path"]
 
     java_files = read_java_files(project_path)
     app_configs = read_application_properties(project_path)
 
-    print(f"    ✅ {len(java_files)} arquivo(s) Java encontrado(s)")
-    print(f"    ✅ {len(app_configs)} arquivo(s) de config encontrado(s)")
+    _log(f"✅ {len(java_files)} arquivo(s) Java encontrado(s)")
+    _log(f"✅ {len(app_configs)} arquivo(s) de config encontrado(s)")
+
+    if _ui:
+        _ui.node_done("read_files")
 
     return {
         "java_files": java_files,
@@ -72,7 +96,10 @@ def detect_issues_node(state: AgentState) -> dict:
     O LLM só entra no próximo nó para enriquecer, não para detectar.
     Isso mantém o custo baixo e o feedback rápido.
     """
-    print("\n🔍 [2/3] Executando detectores de performance...")
+    if _ui:
+        _ui.node_start("detect_issues")
+    else:
+        print("\n🔍 [2/3] Executando detectores de performance...")
 
     java_files = state.get("java_files", [])
     app_configs = state["non_functional_requirements"].get("_app_configs", {})
@@ -81,35 +108,37 @@ def detect_issues_node(state: AgentState) -> dict:
 
     # Roda cada detector e reporta quantos encontrou
     n1_issues = detect_n_plus_one(java_files)
-    print(f"    N+1 Query:       {len(n1_issues)} issue(s)")
+    _log(f"N+1 Query:       {len(n1_issues)} issue(s)")
     issues.extend(n1_issues)
 
     cache_issues = detect_missing_cache(java_files)
-    print(f"    Cache Ausente:   {len(cache_issues)} issue(s)")
+    _log(f"Cache Ausente:   {len(cache_issues)} issue(s)")
     issues.extend(cache_issues)
 
     pool_issues = detect_connection_pool(app_configs)
-    print(f"    Connection Pool: {len(pool_issues)} issue(s)")
+    _log(f"Connection Pool: {len(pool_issues)} issue(s)")
     issues.extend(pool_issues)
 
     pagination_issues = detect_pagination_issues(java_files)
-    print(f"    Paginação:       {len(pagination_issues)} issue(s)")
+    _log(f"Paginação:       {len(pagination_issues)} issue(s)")
     issues.extend(pagination_issues)
 
     lazy_issues = detect_lazy_loading(java_files)
-    print(f"    Lazy Loading:    {len(lazy_issues)} issue(s)")
+    _log(f"Lazy Loading:    {len(lazy_issues)} issue(s)")
     issues.extend(lazy_issues)
 
     blocking_issues = detect_thread_blocking(java_files)
-    print(f"    Thread Blocking: {len(blocking_issues)} issue(s)")
+    _log(f"Thread Blocking: {len(blocking_issues)} issue(s)")
     issues.extend(blocking_issues)
 
     index_issues = detect_missing_index(java_files)
-    print(f"    Índice Ausente:  {len(index_issues)} issue(s)")
+    _log(f"Índice Ausente:  {len(index_issues)} issue(s)")
     issues.extend(index_issues)
 
-    print(f"    ─────────────────────────────")
-    print(f"    Total: {len(issues)} issue(s) encontrado(s)")
+    _log(f"Total: {len(issues)} issue(s) encontrado(s)")
+
+    if _ui:
+        _ui.node_done("detect_issues")
 
     return {
         "issues": issues,
@@ -130,13 +159,19 @@ def enrich_with_llm_node(state: AgentState) -> dict:
     Para manter o custo controlado, enviamos apenas o trecho relevante
     do arquivo, não o arquivo inteiro.
     """
-    print("\n🤖 [3/3] Enriquecendo issues com análise do LLM...")
+    if _ui:
+        _ui.node_start("enrich_with_llm")
+    else:
+        print("\n🤖 [3/3] Enriquecendo issues com análise do LLM...")
 
     issues = state.get("issues", [])
     java_files = state.get("java_files", [])
 
     if not issues:
-        print("    ⚠️  Nenhum issue para enriquecer.")
+        _log("⚠️  Nenhum issue para enriquecer.")
+        if _ui:
+            _ui.node_done("enrich_with_llm")
+            _ui.agent_done("Nenhum issue encontrado")
         return {"messages": ["Nenhum issue encontrado para enriquecer."]}
 
     llm = ChatOpenAI(
@@ -151,7 +186,7 @@ def enrich_with_llm_node(state: AgentState) -> dict:
     enriched_issues = []
 
     for i, issue in enumerate(issues):
-        print(f"    Analisando issue {i+1}/{len(issues)}: {issue.category.value}...")
+        _log(f"Issue {i+1}/{len(issues)}: {issue.category.value}...")
 
         # Extrai o trecho relevante do arquivo (±15 linhas ao redor do problema)
         snippet = _extract_snippet(file_index, issue)
@@ -164,10 +199,14 @@ def enrich_with_llm_node(state: AgentState) -> dict:
             enriched_issues.append(enriched)
         except Exception as e:
             # Se o LLM falhar, mantém o issue original sem enriquecimento
-            print(f"    ⚠️  LLM falhou para issue {i+1}: {e}")
+            _log(f"⚠️  LLM falhou para issue {i+1}: {e}")
             enriched_issues.append(issue)
 
-    print(f"\n    ✅ {len(enriched_issues)} issue(s) enriquecido(s)")
+    _log(f"✅ {len(enriched_issues)} issue(s) enriquecido(s)")
+
+    if _ui:
+        _ui.node_done("enrich_with_llm")
+        _ui.agent_done(f"{len(enriched_issues)} issue(s) enriquecido(s)")
 
     # Substitui a lista de issues pelo estado enriquecido
     # Usamos uma chave temporária porque issues é Annotated com operator.add
