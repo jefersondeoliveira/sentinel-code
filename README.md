@@ -12,6 +12,7 @@ Dado um projeto Java/Spring Boot ou Terraform/K8s, o SentinelCode:
 4. **Gera testes** funcionais para os endpoints corrigidos
 5. **Executa benchmarks** antes/depois com Locust (opcional)
 6. **Gera relatório** HTML (ou PDF) com causa raiz, diffs antes/depois e métricas de ganho
+7. **Exibe** progresso em tempo real no terminal com painéis animados por agente (Rich)
 
 ## Pré-requisitos
 
@@ -138,27 +139,29 @@ pytest tests/unit/test_iac_patcher.py -v
 
 **169 testes unitários** cobrindo detectores, patchers, benchmark e test agent.
 
-## Exemplo de saída
+## Terminal UI
+
+O pipeline exibe progresso em tempo real usando [Rich](https://github.com/Textualize/rich). Cada agente tem seu próprio painel animado com spinner, lista de nós (◌ pendente → ⠙ rodando → ✓ concluído), logs inline e barra de progresso. Ao final, cards de métricas resumem os resultados.
 
 ```
-📋 Issues Java Encontrados
-┌───┬───────────┬───────────────────────┬──────────────────────────────┬───────┐
-│ # │ Severidade │ Categoria            │ Arquivo                      │ Linha │
-├───┼───────────┼───────────────────────┼──────────────────────────────┼───────┤
-│ 1 │ CRÍTICO   │ N+1 Query             │ src/.../OrderService.java    │ 142   │
-│ 2 │ ALTO      │ Cache Ausente         │ src/.../ProductController.java│ 28   │
-│ 3 │ ALTO      │ Paginação             │ src/.../UserRepository.java  │ 15    │
-│ 4 │ ALTO      │ Índice Ausente        │ src/.../UserRepository.java  │ 18    │
-│ 5 │ CRÍTICO   │ Thread Bloqueante     │ src/.../UserService.java     │ 34    │
-└───┴───────────┴───────────────────────┴──────────────────────────────┴───────┘
+╭─ ⠙ CODE ANALYZER ──────────────────────────────────────────╮
+│  ✓ read_files                                               │
+│  ⠙ detect_issues   Encontrado: N+1 em OrderService.java    │
+│  ◌ enrich_with_llm                                          │
+│  ██████░░░░ 2/3                                             │
+╰─────────────────────────────────────────────────────────────╯
 
-🏗️ Gaps de Infraestrutura
-┌───┬───────────────────────┬──────────────────────┬───────────┐
-│ # │ Categoria             │ Recurso              │ Severidade│
-├───┼───────────────────────┼──────────────────────┼───────────┤
-│ 1 │ K8s Resource Limits   │ Deployment/api       │ ALTO      │
-│ 2 │ K8s Health Check      │ Deployment/api       │ ALTO      │
-└───┴───────────────────────┴──────────────────────┴───────────┘
+╭─ ✓ FIX AGENT ──────────────────────────────────────────────╮
+│  ✓ plan_fixes                                               │
+│  ✓ apply_fixes    3 fixes aplicados                        │
+│  ✓ validate_fixes Todos os patches válidos                  │
+│  ██████████ 3/3                                             │
+╰─────────────────────────────────────────────────────────────╯
+
+  ╭──────────────╮  ╭──────────────╮  ╭──────────────╮
+  │  5 issues    │  │  3 fixes     │  │  2 gaps IaC  │
+  │  detectados  │  │  aplicados   │  │  corrigidos  │
+  ╰──────────────╯  ╰──────────────╯  ╰──────────────╯
 
   📄 Relatório: outputs/report_sample_project_20260311_143022.html
   💡 Abra o arquivo HTML no seu navegador
@@ -214,9 +217,12 @@ sentinel-code/
 │   ├── test_gen/           # Gerador de testes funcionais
 │   └── observability/      # LangSmith tracer
 ├── models/                 # AgentState, Issue, InfraGap
+├── ui/                     # Terminal UI — PipelineUI (Rich.Live)
 ├── templates/              # Template Jinja2 do relatório HTML
 ├── sample_project/         # Projeto Java de exemplo para testes
-├── tests/unit/             # 169 testes unitários
+├── tests/
+│   ├── conftest.py         # Fixture autouse de isolamento de UI
+│   └── unit/               # 169 testes unitários
 └── outputs/                # Relatórios gerados (gitignored)
 ```
 
@@ -240,7 +246,7 @@ sentinel-code/
 - [x] Relatório PDF executivo (`--pdf` flag + WeasyPrint com fallback HTML)
 - [x] Observabilidade com LangSmith (tracing completo do pipeline)
 - [x] Mais detectores Java: PAGINATION, LAZY_LOADING, THREAD_BLOCKING, MISSING_INDEX
-- [x] Terminal UI rica (`ui/progress.py` — Rich.Live, painéis animados por agente, cards de métricas finais)
+- [x] Terminal UI rica (Rich.Live, painéis animados por agente, cards de métricas finais)
 - [ ] Suporte a CloudFormation
 - [ ] Simulação de custo AWS via Pricing API
 
