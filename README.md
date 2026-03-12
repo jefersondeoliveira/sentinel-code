@@ -22,7 +22,7 @@ Dado um projeto Java/Spring Boot ou Terraform/K8s, o SentinelCode:
 ## Instalação
 
 ```bash
-git clone https://github.com/seu-usuario/sentinel-code
+git clone https://github.com/jefersondeoliveira/sentinel-code
 cd sentinel-code
 
 python -m venv .venv
